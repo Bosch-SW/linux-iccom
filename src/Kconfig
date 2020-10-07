@@ -1,0 +1,98 @@
+config BOSCH_ICCOM
+    tristate "Bosch Inter Chip communication driver"
+    depends on BOSCH_DRIVERS
+    default y
+    ---help---
+        The driver for Inter Chip communication, which
+        provides named channels for App-to-App
+        interaction between chips.
+
+        The underlying transport layer may vary with
+        configuration. Original target is Symmetrical
+        SPI transport.
+
+        If unsure, say N.
+
+config BOSCH_ICCOM_SOCKETS
+    tristate "Bosch Inter Chip communication driver User Space sockets adapter"
+    depends on BOSCH_ICCOM
+    default y
+    ---help---
+        The module provides the User Space programs the
+        acces to ICCom driver via sockets interface.
+
+        If unsure, say N.
+
+config BOSCH_ICCOM_TEST_MODULE
+    bool "Build test module for Bosch ICCom driver"
+    depends on BOSCH_ICCOM && BOSCH_FULL_DUPLEX_MIRROR_DEVICE 
+    default n
+    ---help---
+        Set this to Y if you want to build the
+        separate ICCom driver test module, which
+        will conduct all ICCom tests upon insertion
+        in the kernel.
+        
+        NOTE: if full tests (using Symspi device driver) are
+            enabled then this will require also BOSCH_SYMSPI
+            to be set.
+
+config BOSCH_ICCOM_DEBUG
+    bool "Enable debug mode for Bosch ICCom driver"
+    depends on BOSCH_ICCOM
+    default n
+    ---help---
+        Setting this parameter to Y will enable
+        debugging printouts for RX messages
+        and TX packages of ICCom driver and also
+        some additional checks and printouts.
+
+config BOSCH_ICCOM_DEBUG_CHANNEL
+    int "The number of channel to debug, -1 means all"
+    depends on BOSCH_ICCOM_DEBUG
+    default -1
+    ---help---
+        If set to channel number, then ICCom driver
+        in debug mode will print out only information
+        regarding given channel.
+        If set to -1, information of all channels will
+        be provided.
+
+config ICCOM_DEBUG_MESSAGES_PRINTOUT_MAX_COUNT
+    int "The number of RX messages to printout by xfer end"
+    depends on BOSCH_ICCOM_DEBUG
+    default 5
+    ---help---
+        Defines the number of received messages from
+        messages storage which will be printed out at once.
+        -1 means unlimited;
+        0  means nothing;
+
+config ICCOM_DEBUG_PACKAGES_PRINTOUT_MAX_COUNT
+    int "The number of packages to printout by xfer end"
+    depends on BOSCH_ICCOM_DEBUG
+    default 5
+    ---help---
+        Defines the number of packages which will be
+        printed out from the packages transmission queue
+        at once.
+        -1 means unlimited;
+        0  means nothing;
+
+config BOSCH_ICCOM_EXAMPLE
+    tristate "The ICCom + SymSPI example protocol module"
+    depends on BOSCH_ICCOM_SOCKETS && BOSCH_ICCOM && BOSCH_SYMSPI
+    default y
+    ---help---
+        Adds the ICCom + SymSPI protocol configuration into
+        the ICCom protocol options list, enabling ICCom to use
+        it for communication.
+
+config BOSCH_ICCOM_TRANSPORT_MIRROR_V1
+    tristate "The transport level mirrored ICCom protocol driver"
+    depends on BOSCH_ICCOM_SOCKETS && BOSCH_ICCOM
+    default n
+    ---help---
+        Adds the ICCom protocol which is mirrored at the byte
+        transport full-duplex layer. This can be useful for testing
+        the ICCom protocol driver itself.
