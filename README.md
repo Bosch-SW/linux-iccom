@@ -297,7 +297,7 @@ The ICCom Socket IF driver uses the API above to provide a socket
 based communication channels to User space application.
 
 The User space usage examples are listed in ICCom convenience library
-documentation: [Libiccom](https://github.com/Bosch-SW/linux-libiccom).
+documentation: [Libiccom](https://github.com/Bosch-SW/libiccom).
 
 In short, the ICCom stack usage from User space applications converges
 to following picture:
