@@ -167,7 +167,7 @@ struct full_duplex_sym_iface {
 ```
 For more information on the full duplex symmetrical interface see
 its repo:
-[Full-Duplex Symmetrical Interface](https://github.com/Bosch-SW/linux-full-duplex-sym-iface)
+[Full-Duplex Symmetrical Interface](https://github.com/Bosch-SW/linux-full-duplex-interface)
 
 **NOTE:** to support several physical buses mapping to channel
   set, one will only need to update the ICCom Socket IF driver,
@@ -180,7 +180,7 @@ its repo:
 There are no transport hardware requirements for the ICCom.
 The transport hardware is totally abstracted by the transport
 layer, see:
-[Full-Duplex Symmetrical Interface](https://github.com/Bosch-SW/linux-full-duplex-sym-iface).
+[Full-Duplex Symmetrical Interface](https://github.com/Bosch-SW/linux-full-duplex-interface).
 
 RAM requirements are configurable: ICCom keeps all messages
 which were not yet consumed by the consumer layers (internal
