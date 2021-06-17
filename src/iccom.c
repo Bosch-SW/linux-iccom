@@ -103,6 +103,49 @@
 
 #define ICCOM_LOG_PREFIX "ICCom: "
 
+// Selects the workqueue to use to run consumer delivery operations
+// to not to block the underlying transport layer.
+//
+// Three options are available now:
+// * "ICCOM_WQ_SYSTEM": see system_wq in workqueue.h.
+// * "ICCOM_WQ_SYSTEM_HIGHPRI": see system_highpri_wq in
+//   workqueue.h.
+// * "ICCOM_WQ_PRIVATE": use privately constructed single threaded
+//   workqueue.
+//
+// NOTE: the selection of the workqueue depends on the
+//      generic considerations on ICCom functioning
+//      within the overall system context. Say if ICCom serves
+//      as a connection for an optional device, or device which
+//      can easily wait for some sec (in the worst case) to react
+//      then "ICCOM_WQ_SYSTEM" workqeue is a nice option to select.
+//      On the other hand if no delays are allowed in handling ICCom
+//      communication (say, to communicate to hardware watchdog)
+//      then "ICCOM_WQ_SYSTEM_HIGHPRI" or "ICCOM_WQ_PRIVATE" is
+//      surely more preferrable.
+//
+// Can be set via kernel config, see:
+// 		BOSCH_ICCOM_WORKQUEUE_MODE configuration parameter
+#ifndef ICCOM_WORKQUEUE_MODE
+#define ICCOM_WORKQUEUE_MODE ICCOM_WQ_PRIVATE
+#endif
+
+#define ICCOM_WQ_SYSTEM 0
+#define ICCOM_WQ_SYSTEM_HIGHPRI 1
+#define ICCOM_WQ_PRIVATE 2
+
+// Comparator
+#define ICCOM_WORKQUEUE_MODE_MATCH(x)		\
+	ICCOM_WORKQUEUE_MODE == ICCOM_WQ_##x
+
+// the number alias to workqueue mode
+#ifndef ICCOM_WORKQUEUE_MODE
+#error ICCOM_WORKQUEUE_MODE must be defined to \
+		one of [ICCOM_WQ_SYSTEM, ICCOM_WQ_SYSTEM_HIGHPRI, \
+		ICCOM_WQ_PRIVATE].
+#endif
+
+
 // DEV STACK
 // @@@@@@@@@@@@@
 //
@@ -117,8 +160,6 @@
 // BACKLOG:
 //
 //      * TODO in iccom_close
-//
-//      * make statistics available via /proc/iccom_statistics file
 //
 //      * allow socket callbacks definition hierarchy and mapping
 //        PER CHANNEL END:
@@ -612,6 +653,14 @@ struct iccom_message_storage
 
 // Iccom device statistics
 //
+// @packages_bad_data_received incremented every time we get
+//      a package with a broken data (like wrong length, wrong
+//      CRC32 sum, etc.).
+// @packages_duplicated_received incremented every time we
+//      get a duplicated package.
+// @packages_parsing_failed incremented every time we fail
+//      to parse the package data into correct packets.
+//
 // NOTE: statistics is not guaranteed to be percise or even
 //      selfconsistent. This data is mainly for debugging,
 //      general picture monitoring. Don't use these values
@@ -624,6 +673,9 @@ struct iccom_dev_statistics {
 	unsigned long long packages_xfered;
 	unsigned long long packages_sent_ok;
 	unsigned long long packages_received_ok;
+	unsigned long long packages_bad_data_received;
+	unsigned long long packages_duplicated_received;
+	unsigned long long packages_parsing_failed;
 	unsigned long long packets_received_ok;
 	unsigned long long messages_received_ok;
 	unsigned long packages_in_tx_queue;
@@ -725,6 +777,12 @@ struct iccom_error_rec {
 //      packages with the same sequence ID.
 // @rx_messages the incoming messages storage. Stores completed incoming
 //      messages as well as under construction incoming messages.
+// @work_queue pointer to personal ICCom dedicated work-queue to handle
+//      communication jobs. It is used mainly for stability consderations
+//      cause publicitly available work-queue can potentially be blocked
+//      by other running/pending tasks. So to stay on a safe side we
+//      will allocate our own single-threaded workqueue for our purposes.
+//      NOTE: used only when ICCOM_WORKQUEUE_MODE equals ICCOM_WQ_PRIVATE
 // @consumer_delivery_work the kworker which is responsible for
 //      notification and delivery to the consumer finished incoming
 //      messages.
@@ -760,6 +818,9 @@ struct iccom_dev_private {
 
 	struct iccom_message_storage rx_messages;
 
+#if ICCOM_WORKQUEUE_MODE_MATCH(PRIVATE)
+	struct workqueue_struct *work_queue;
+#endif
 	struct work_struct consumer_delivery_work;
 
 	bool closing;
@@ -1746,6 +1807,13 @@ static int __iccom_msg_storage_pass_channel_to_consumer(
 	int count = 0;
 	struct iccom_message *msg;
 
+	// NOTE: the only guy to remove the message from the
+	// 	storage is us, so if we unlock the mutex while our
+	// 	consumer deals with the message, we only allow
+	// 	to add new messages into the storage, while removing
+	// 	them is our responsibility, so we shall not face with
+	// 	the issue that we step onto message which will suddenly
+	// 	be removed.
 	list_for_each_entry(msg, &channel_rec->messages
 			    , list_anchor) {
 		if (!__iccom_message_is_ready(msg)) {
@@ -2898,6 +2966,87 @@ static bool __iccom_error_report(struct iccom_dev *iccom
 	return true;
 }
 
+// Helper.
+// Inits the workqueue which is to be used by ICCom
+// in its current configuration. If we use system-provided
+// workqueue - does nothing.
+//
+// RETURNS:
+//      >= 0     - on success
+//      < 0     - negative error code
+//
+// ERRORS:
+//      EAGAIN if workqueue init fails
+static inline int __iccom_init_workqueue(
+		const struct iccom_dev __kernel *const iccom)
+{
+#if ICCOM_WORKQUEUE_MODE_MATCH(SYSTEM)
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "using system wq");
+	(void)iccom;
+	return 0;
+#elif ICCOM_WORKQUEUE_MODE_MATCH(SYSTEM_HIGHPRI)
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "using system_highpri wq");
+	(void)iccom;
+	return 0;
+#elif ICCOM_WORKQUEUE_MODE_MATCH(PRIVATE)
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "using private wq");
+	iccom->p->work_queue = alloc_workqueue("iccom", WQ_HIGHPRI, 0);
+
+	if (iccom->p->work_queue) {
+		return 0;
+	}
+
+	iccom_err("%s: the private work queue init failed."
+				, __func__);
+	return -EAGAIN;
+#endif
+}
+
+// Helper.
+// Closes the workqueue which was used by SymSPI
+// in its current configuration. If we use system-provided
+// workqueu - does nothing.
+static inline void __iccom_close_workqueue(
+		const struct iccom_dev *const iccom)
+{
+#if ICCOM_WORKQUEUE_MODE_MATCH(PRIVATE)
+	destroy_workqueue(iccom->p->work_queue);
+	iccom->p->work_queue = NULL;
+#else
+	(void)iccom;
+#endif
+}
+
+// Helper.
+// Wrapper over schedule_work(...) for queue selected by configuration.
+// Schedules SymSPI work to the target queue.
+static inline void __iccom_schedule_work(
+		const struct iccom_dev *const iccom
+		, struct work_struct *work)
+{
+#if ICCOM_WORKQUEUE_MODE_MATCH(SYSTEM)
+	(void)iccom;
+	schedule_work(work);
+#elif ICCOM_WORKQUEUE_MODE_MATCH(SYSTEM_HIGHPRI)
+	(void)iccom;
+	queue_work(system_highpri_wq, work);
+#elif ICCOM_WORKQUEUE_MODE_MATCH(PRIVATE)
+	queue_work(iccom->p->work_queue, work);
+#else
+#error no known SymSPI work queue mode defined
+#endif
+}
+
+// Helper.
+// Wrapper over cancel_work_sync(...) in case we will
+// need some custom queue operations on cancelling.
+static inline void __iccom_cancel_work_sync(
+		const struct iccom_dev *const iccom
+		, struct work_struct *work)
+{
+	cancel_work_sync(work);
+}
+
 // Helper. Provides next outgoing package id.
 static int __iccom_get_next_package_id(struct iccom_dev *iccom)
 {
@@ -3012,7 +3161,7 @@ static int __iccom_enqueue_empty_tx_data_package(struct iccom_dev *iccom)
 static inline bool __iccom_verify_package_crc(
 	struct iccom_package *package)
 {
-       return __iccom_package_get_src(package)
+	return __iccom_package_get_src(package)
 		    == __iccom_package_compute_src(package);
 }
 
@@ -3110,7 +3259,7 @@ static inline void __iccom_fillup_ack_xfer(
 // the correct receiving of the data.
 static inline bool __iccom_verify_ack(struct iccom_package *package)
 {
-       return (package->size == ICCOM_ACK_XFER_SIZE_BYTES)
+	return (package->size == ICCOM_ACK_XFER_SIZE_BYTES)
 		&& (package->data[0] == ICCOM_PACKAGE_ACK_VALUE);
 }
 
@@ -3175,24 +3324,24 @@ finalize:
 static void __iccom_queue_free(struct iccom_dev *iccom)
 {
 #ifdef ICCOM_DEBUG
-    if (!__iccom_have_packages(iccom)) {
+	if (!__iccom_have_packages(iccom)) {
 	    iccom_err("empty TX packages");
-    }
+	}
 #endif
-    mutex_lock(&iccom->p->tx_queue_lock);
+	mutex_lock(&iccom->p->tx_queue_lock);
 
-    struct iccom_package *first_package
+	struct iccom_package *first_package
 		    = __iccom_get_first_tx_package(iccom);
 
-    while (first_package) {
+	while (first_package) {
 	    __iccom_package_free(first_package);
 	    first_package = __iccom_get_first_tx_package(iccom);
-    }
+	}
 
-    // freeing the TX queue access
-    mutex_unlock(&iccom->p->tx_queue_lock);
+	// freeing the TX queue access
+	mutex_unlock(&iccom->p->tx_queue_lock);
 
-    mutex_destroy(&iccom->p->tx_queue_lock);
+	mutex_destroy(&iccom->p->tx_queue_lock);
 }
 
 // Helper. Enqueues given message into the queue. Adds as many
@@ -3480,7 +3629,8 @@ static int __iccom_process_package_payload(
 
 	if (finalized > 0) {
 		// notify consumer if there is any new ready messages
-		schedule_work(&iccom->p->consumer_delivery_work);
+		__iccom_schedule_work(iccom
+				, &iccom->p->consumer_delivery_work);
 	}
 	return 0;
 }
@@ -3622,6 +3772,7 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 		// if package level data is not selfconsistent
 		if (payload_size < 0) {
 			__iccom_fillup_ack_xfer(iccom, &iccom->p->xfer, false);
+			iccom->p->statistics.packages_bad_data_received += 1;
 			goto finalize;
 		}
 
@@ -3631,6 +3782,7 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 		int rx_pkg_id = __iccom_package_get_id(&rx_pkg);
 		if (rx_pkg_id == iccom->p->last_rx_package_id) {
 			__iccom_fillup_ack_xfer(iccom, &iccom->p->xfer, true);
+			iccom->p->statistics.packages_duplicated_received += 1;
 			goto finalize;
 		}
 
@@ -3640,10 +3792,9 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 		if (__iccom_process_package_payload(iccom, pkg_payload
 					  , (size_t)payload_size) != 0) {
 			__iccom_fillup_ack_xfer(iccom, &iccom->p->xfer, false);
+			iccom->p->statistics.packages_parsing_failed += 1;
 			goto finalize;
 		}
-
-		schedule_work(&iccom->p->consumer_delivery_work);
 
 		// package parsing was OK
 		iccom->p->statistics.packages_received_ok++;
@@ -3899,8 +4050,11 @@ static ssize_t __iccom_statistics_read(struct file *file
 		       "packages: xfered total:  %llu\n"
 		       "packages: sent ok:  %llu\n"
 		       "packages: received ok:  %llu\n"
-		       "packages: sent fail:  %llu\n"
-		       "packages: received fail:  %llu\n"
+		       "packages: sent fail (total):  %llu\n"
+		       "packages: received fail (total):  %llu\n"
+		       "packages:     received corrupted:  %llu\n"
+		       "packages:     received duplicated:  %llu\n"
+		       "packages:     detailed parsing failed:  %llu\n"
 		       "packages: in tx queue:  %lu\n"
 		       "packets: received ok:  %llu\n"
 		       "messages: received ok:  %llu\n"
@@ -3918,6 +4072,9 @@ static ssize_t __iccom_statistics_read(struct file *file
 		     , s->packages_received_ok
 		     , s->packages_xfered - s->packages_sent_ok
 		     , s->packages_xfered - s->packages_received_ok
+		     , s->packages_bad_data_received
+		     , s->packages_duplicated_received
+		     , s->packages_parsing_failed
 		     , s->packages_in_tx_queue
 		     , s->packets_received_ok
 		     , s->messages_received_ok
@@ -4340,6 +4497,13 @@ int iccom_init(struct iccom_dev *iccom)
 	__iccom_fillup_next_data_xfer(iccom, &iccom->p->xfer);
 	iccom->p->data_xfer_stage = true;
 
+	// init workqueue for delivery to consumer
+	res = __iccom_init_workqueue(iccom);
+	if (res != 0) {
+		iccom_err("Could not init own workqueue.");
+		goto free_pkg_storage;
+	}
+
 	// initiate consumer notification work
 	INIT_WORK(&iccom->p->consumer_delivery_work
 		  , __iccom_consumer_notification_routine);
@@ -4353,11 +4517,13 @@ int iccom_init(struct iccom_dev *iccom)
 	if (res < 0) {
 		iccom_err("Full duplex xfer device failed to"
 			  " initialize, err: %d", res);
-		return res;
+		goto free_workqueue;
 	}
 
 	return 0;
 
+free_workqueue:
+	__iccom_close_workqueue(iccom);
 free_pkg_storage:
 	__iccom_free_packages_storage(iccom);
 free_msg_storage:
@@ -4460,9 +4626,12 @@ void iccom_close(struct iccom_dev *iccom)
 	iccom_info_raw(ICCOM_LOG_INFO_OPT_LEVEL
 		       , "closing device (%px)", iccom);
 
-	cancel_work_sync(&iccom->p->consumer_delivery_work);
+	__iccom_cancel_work_sync(iccom
+			, &iccom->p->consumer_delivery_work);
 
 	__iccomm_stop_xfer_device(iccom);
+
+	__iccom_close_workqueue(iccom);
 
 	// @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
 	// TODO

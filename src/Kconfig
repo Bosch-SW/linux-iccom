@@ -79,6 +79,28 @@ config ICCOM_DEBUG_PACKAGES_PRINTOUT_MAX_COUNT
         -1 means unlimited;
         0  means nothing;
 
+config BOSCH_ICCOM_WORKQUEUE_MODE
+    string "The consumer layer data delivery work queue selector"
+    depends on BOSCH_ICCOM
+    default "SYSTEM"
+    ---help---
+        Defines the work queue which will be used to deliver
+        the messages to the consumer layer (say, from ICCom driver
+        to the ICCom Sockets Interface driver). The selection
+        is to be made on the basis of the latency allowed in the
+        ICCom data delivery. The more critical the latency the
+        faster WQ is to be selected. Possible options, starting
+        from high latency expectations and ending with low latency
+        expectations:
+            - "SYSTEM": use standard common workqueue (note, it can
+                    easily frees from time to time)
+            - "SYSTEM_HIGHPRI": use the system common high priority
+                    workqueue, provides lower latency values
+                    expectation
+            - "PRIVATE": use ICCom dedicated high priority workqueue,
+                    in theory the option which provides the lowest
+                    latency values expectation
+
 config BOSCH_ICCOM_EXAMPLE
     tristate "The ICCom + SymSPI example protocol module"
     depends on BOSCH_ICCOM_SOCKETS && BOSCH_ICCOM && BOSCH_SYMSPI
