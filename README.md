@@ -304,6 +304,29 @@ to following picture:
 
 ![ICCom stack User space API](docs/assets/iccom-application-api.png)
 
+# Current startup picture and module dependencies
+
+Long story short, the current picture is the following:
+
+![ICCom Dependencies](docs/assets/iccom-dependencies.png)
+
+1. First: the ICCom Socket IF driver (`iccom_socket_if.c`) gets into
+   its `init()` (it is the root driver to load the ICCom stack for now).
+
+1. ICCom Socket IF calls the custom configuration driver routine
+   (now manually hardcoded in `iccom_socket_if.c`), which will
+   create the dedicated transport device which exposes the
+`  full_duplex_sym_iface` defined in `full_duplex_interface.h`.
+   This device will be later used by ICCom driver as a transport layer.
+   **NOTE:** hardcoded call is a bad style and to be removed, so no
+   dependency will be between custom configuration driver and the ICCom
+   Socket IF driver code.
+
+1. ICCom Socket IF driver creates the ICCom device and bindes it to the
+   provided transport layer.
+
+1. ICCom Socket IF lets the ICCom stack to run.
+
 # What it is NOT about
 
 It is not about permissions control on the sockets (*at least for now*):
