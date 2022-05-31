@@ -327,6 +327,18 @@ Long story short, the current picture is the following:
 
 1. ICCom Socket IF lets the ICCom stack to run.
 
+# How to build and run it
+
+This repository is expected to be built as out-of-tree module.
+
+ICCom driver itself (`iccom.c`) has following **run dependencies**:
+
+1. Needs **a** driver which implements Full Duplex Interface driver,
+   which will work as a transport layer (SymSPI or similar).
+
+1. Needs an aggregator driver, which actually instantiates
+   ICCom instance binded with dedicated transport layer.
+
 # What it is NOT about
 
 It is not about permissions control on the sockets (*at least for now*):
