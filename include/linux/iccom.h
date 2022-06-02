@@ -24,7 +24,7 @@
 
 #ifndef ICCOM_HEADER
 
-#include "../full_duplex_interface/full_duplex_interface.h"
+#include <linux/full_duplex_interface.h>
 
 // the channel value which is interpreted as (any/all) channel(s)
 #define ICCOM_ANY_CHANNEL_VALUE -1

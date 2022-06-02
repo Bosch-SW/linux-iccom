@@ -47,8 +47,10 @@
 #include <linux/module.h>
 #include <linux/proc_fs.h>
 #include <linux/uaccess.h>
+#include <linux/version.h>
 
-#include "../full_duplex_interface/full_duplex_interface.h"
+#include <linux/full_duplex_interface.h>
+
 #include "iccom.h"
 
 /* --------------------- BUILD CONFIGURATION ----------------------------*/
@@ -322,6 +324,11 @@
 #define ICCOM_PACKET_INITIAL_MESSAGE_ID 1
 
 /* --------------------- UTILITIES SECTION ----------------------------- */
+
+// to keep the compatibility with Kernel versions earlier than v5.5
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
+    #define pr_warning pr_warn
+#endif
 
 #if ICCOM_VERBOSITY >= 1
 #define iccom_err(fmt, ...)						\
@@ -831,7 +838,13 @@ struct iccom_dev_private {
 
 	struct proc_dir_entry *proc_root;
 
+// to keep the compatibility with Kernel versions earlier than v5.6
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+	struct proc_ops statistics_ops;
+#else
 	struct file_operations statistics_ops;
+#endif
+
 	struct proc_dir_entry *statistics_file;
 };
 
@@ -3969,8 +3982,14 @@ static inline int __iccom_statistics_init(struct iccom_dev *iccom)
 
 	// statistics access operations
 	memset(&iccom->p->statistics_ops, 0, sizeof(iccom->p->statistics_ops));
+
+// to keep the compatibility with Kernel versions earlier than v5.6
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+	iccom->p->statistics_ops.proc_read  = &__iccom_statistics_read;
+#else
 	iccom->p->statistics_ops.read  = &__iccom_statistics_read;
 	iccom->p->statistics_ops.owner = THIS_MODULE;
+#endif
 
 	if (IS_ERR_OR_NULL(iccom->p->proc_root)) {
 		iccom_err("failed to create statistics proc entry:"

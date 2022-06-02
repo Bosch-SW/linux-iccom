@@ -6,7 +6,7 @@ FROM ubuntu:latest
 #   $ docker run -it YOUR_IMAGE_NAME sh
 #   $ sudo -u YOUR_USERNAME docker run -it YOUR_IMAGE_HASH bash
 #   FOR EXAMPLE:
-#     $ sudo -u gua1rng docker run -it c8c279906c2e bash
+#     $ sudo -u `whoami` docker run -it c8c279906c2e bash
 # NOTE: to list available images:
 #   $ docker images
 # NOTE: to run the images:

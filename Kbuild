@@ -1,5 +1,5 @@
-ccflags-y := -std=gnu99 -Wno-declaration-after-statement
-ccflags-y += -Iinclude/linux
+ccflags-y := -std=gnu99 -Wno-declaration-after-statement -I$(src)/include/linux
+ccflags-y += -I$(src)/include
 
 ccflags-$(CONFIG_BOSCH_ICCOM_DEBUG) += -DICCOM_DEBUG
 ifeq ($(CONFIG_BOSCH_ICCOM_DEBUG), y)
