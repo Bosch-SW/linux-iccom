@@ -1290,7 +1290,7 @@ void iccom_dbg_printout_xfer(const struct full_duplex_xfer *const xfer)
 		return;
 	}
 	printk("Xfer ptr: %px\n", xfer);
-	printk("Xfer size: %u\n", xfer->size_bytes);
+	printk("Xfer size: %zu\n", xfer->size_bytes);
 	if (IS_ERR(xfer->data_tx)) {
 		printk("Xfer TX data ptr: BROKEN: %px\n", xfer->data_tx);
 	} else if (xfer->data_tx) {
@@ -3839,7 +3839,6 @@ finalize:
 	// switching to other stage (the only point where the
 	// data_xfer_stage is being written)
 	iccom->p->data_xfer_stage = !iccom->p->data_xfer_stage;
-
 #ifdef ICCOM_DEBUG
 	mutex_lock(&iccom->p->rx_messages.lock);
 	__iccom_msg_storage_printout(&iccom->p->rx_messages

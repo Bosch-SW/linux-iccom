@@ -52,4 +52,9 @@ COPY . .
 #   but one below it, with explicit headers version, which is only
 #   available
 #RUN make -C /lib/modules/`uname -r`/build M=/repos/iccom
+# Base (default) version
 RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom
+
+# Alternating configs version
+RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+    CONFIG_BOSCH_ICCOM_DEBUG=y
