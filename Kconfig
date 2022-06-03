@@ -58,6 +58,7 @@ config BOSCH_ICCOM_DEBUG_CHANNEL
         If set to -1, information of all channels will
         be provided.
 
+# TODO: to move it to the dynamic configurable and use this only as default
 config ICCOM_DEBUG_MESSAGES_PRINTOUT_MAX_COUNT
     int "The number of RX messages to printout by xfer end"
     depends on BOSCH_ICCOM_DEBUG
@@ -68,6 +69,7 @@ config ICCOM_DEBUG_MESSAGES_PRINTOUT_MAX_COUNT
         -1 means unlimited;
         0  means nothing;
 
+# TODO: to move it to the dynamic configurable and use this only as default
 config ICCOM_DEBUG_PACKAGES_PRINTOUT_MAX_COUNT
     int "The number of packages to printout by xfer end"
     depends on BOSCH_ICCOM_DEBUG

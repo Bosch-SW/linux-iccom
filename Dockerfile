@@ -52,9 +52,35 @@ COPY . .
 #   but one below it, with explicit headers version, which is only
 #   available
 #RUN make -C /lib/modules/`uname -r`/build M=/repos/iccom
-# Base (default) version
-RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom
 
-# Alternating configs version
+######### BUILD CONFIGURATIONS #########
+
+# Base (default) version
 RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
-    CONFIG_BOSCH_ICCOM_DEBUG=y
+    && rm -rf /repos/iccom/*
+COPY . .
+
+# Workqueue - use the system WQ
+RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM \
+    && rm -rf /repos/iccom/*
+COPY . .
+
+# Workqueue - use the system high prio WQ
+RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM_HIGHPRI \
+    && rm -rf /repos/iccom/*
+COPY . .
+
+# Workqueue - use the private highprio WQ
+RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=PRIVATE \
+    && rm -rf /repos/iccom/*
+COPY . .
+
+# Debug with embedded defaults
+RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+        CONFIG_BOSCH_ICCOM_DEBUG=y \
+    && rm -rf /repos/iccom/*
+COPY . .
+
