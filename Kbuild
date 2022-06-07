@@ -1,4 +1,4 @@
-ccflags-y := -std=gnu99 -Wno-declaration-after-statement -I$(src)/include/linux
+ccflags-y := -std=gnu99 -Wno-declaration-after-statement
 ccflags-y += -I$(src)/include
 
 ccflags-$(CONFIG_BOSCH_ICCOM_DEBUG) += -DICCOM_DEBUG
@@ -21,8 +21,8 @@ else ifeq ($(CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE), "PRIVATE")
     ccflags-y += -DICCOM_WORKQUEUE_MODE=ICCOM_WQ_PRIVATE
 endif
 
-#obj-$(CONFIG_BOSCH_ICCOM) += iccom.o
-obj-m += src/iccom.o
+obj-$(CONFIG_BOSCH_ICCOM) += src/iccom.o
+
 ifeq ($(CONFIG_BOSCH_ICCOM_TEST_MODULE), y)
     obj-m += src/iccom_test.o
 endif

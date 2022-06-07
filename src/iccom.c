@@ -50,8 +50,7 @@
 #include <linux/version.h>
 
 #include <linux/full_duplex_interface.h>
-
-#include "iccom.h"
+#include <linux/iccom.h>
 
 /* --------------------- BUILD CONFIGURATION ----------------------------*/
 

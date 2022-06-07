@@ -1,5 +1,13 @@
 FROM ubuntu:latest
 
+# The ICCom test dependencies
+# NOTE: those are passed to the Docker build by the following cmd:
+#   <usual docker build command> --build-arg <varname>=<value>
+
+# The path to the Full Duplex Mirror driver source directory
+# Github path: https://github.com/Bosch-SW/linux-full-duplex-interface
+ARG fddm-driver-src-root
+
 # NOTE: to purge the Docker unused files use:
 #   $ docker system prune -a
 # NOTE: to run shell on the image:
@@ -41,6 +49,14 @@ RUN apt-get install --yes autoconf libtool build-essential
 # NOTE: using one of available instead
 RUN apt-get install --yes linux-headers-5.15.0-25-generic
 
+
+########## Dependency 1: FDDM driver
+#ENV fddm_src=/repos/fddm/
+#RUN rm -rf ${fddm_src} && mkdir -p ${fddm_src}
+
+
+########## Here we go: build and test
+
 # And now the ICCom and its build itself using the
 # ICCom source which contains our Dockerfile
 RUN rm -rf /repos/iccom/ && mkdir -p /repos/iccom
@@ -53,33 +69,39 @@ COPY . .
 #   available
 #RUN make -C /lib/modules/`uname -r`/build M=/repos/iccom
 
-######### BUILD CONFIGURATIONS #########
+
+### BUILD CONFIGURATIONS ###
 
 # Base (default) version
 RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+        CONFIG_BOSCH_ICCOM=m \
     && rm -rf /repos/iccom/*
 COPY . .
 
 # Workqueue - use the system WQ
 RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+        CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM \
     && rm -rf /repos/iccom/*
 COPY . .
 
 # Workqueue - use the system high prio WQ
 RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+        CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM_HIGHPRI \
     && rm -rf /repos/iccom/*
 COPY . .
 
 # Workqueue - use the private highprio WQ
 RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+        CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=PRIVATE \
     && rm -rf /repos/iccom/*
 COPY . .
 
 # Debug with embedded defaults
 RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
+        CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_DEBUG=y \
     && rm -rf /repos/iccom/*
 COPY . .
