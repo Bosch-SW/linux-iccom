@@ -1,12 +1,7 @@
-FROM ubuntu:latest
+# The file describes the testing sequence of the SymSPI driver
+# * builds and tests SymSPI in various configurations
 
-# The ICCom test dependencies
-# NOTE: those are passed to the Docker build by the following cmd:
-#   <usual docker build command> --build-arg <varname>=<value>
-
-# The path to the Full Duplex Mirror driver source directory
-# Github path: https://github.com/Bosch-SW/linux-full-duplex-interface
-ARG fddm-driver-src-root
+FROM bosch-linux-full-duplex-interface:latest
 
 # NOTE: to purge the Docker unused files use:
 #   $ docker system prune -a
@@ -15,8 +10,8 @@ ARG fddm-driver-src-root
 #   $ sudo -u YOUR_USERNAME docker run -it YOUR_IMAGE_HASH bash
 #   FOR EXAMPLE:
 #     $ sudo -u `whoami` docker run -it c8c279906c2e bash
-# NOTE: to list available images:
-#   $ docker images
+# NOTE: to list latest available images:
+#   $ sudo -u `whoami` docker images | head
 # NOTE: to run the images:
 #   $ docker run -i IMAGE_HASH
 # NOTE: to run the docker on prepared system (from src root)
@@ -24,85 +19,95 @@ ARG fddm-driver-src-root
 # NOTE: if you have your permissions denied, try (from src root)
 #   $ sudo -u `whoami` docker build .
 
-RUN apt-get update && apt-get upgrade --yes
-
-# refresh + essentials
-RUN apt-get update \
-    && apt-get install apt-utils \
-    && apt-get install --yes wget git curl bash vim
-
-# without this Git will fail on any secure connections
-# NOTE: the http(s)_proxy envars are set from the Docker
-#   host configuration (see ~/.docker/config.json file on host)
-RUN git config --global http.proxy ${http_proxy}
-RUN git config --global https.proxy ${https_proxy}
-
-# Build tools
-RUN apt-get install --yes autoconf libtool build-essential
-
-# Current OS sources
-#RUN apt-get install --yes linux-image-unsigned-$(uname -r)
-
-# NOTE: following doesn't work, cause the running kernel differs
-#   from what is provided
-#RUN apt-get install --yes linux-headers-$(uname -r)
-# NOTE: using one of available instead
-RUN apt-get install --yes linux-headers-5.15.0-25-generic
-
-
-########## Dependency 1: FDDM driver
-#ENV fddm_src=/repos/fddm/
-#RUN rm -rf ${fddm_src} && mkdir -p ${fddm_src}
-
-
 ########## Here we go: build and test
 
-# And now the ICCom and its build itself using the
-# ICCom source which contains our Dockerfile
-RUN rm -rf /repos/iccom/ && mkdir -p /repos/iccom
+ENV repo_path=/repos/linux-iccom
+RUN rm -rf ${repo_path} && mkdir -p ${repo_path}
 
 # add only for the container, not for an image
-WORKDIR /repos/iccom/
+WORKDIR ${repo_path}
 COPY . .
-# NOTE: for the reason above: using not the proper line below,
-#   but one below it, with explicit headers version, which is only
-#   available
-#RUN make -C /lib/modules/`uname -r`/build M=/repos/iccom
 
-
-### BUILD CONFIGURATIONS ###
+### TEST BUILDS CONFIGURATIONS ###
 
 # Base (default) version
-RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
-        CONFIG_BOSCH_ICCOM=m \
-    && rm -rf /repos/iccom/*
+ARG kernel_version=5.15.0-25-generic
+ARG kernel_source_dir=/lib/modules/${kernel_version}/build
+
+# Default build
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_CHECK_SIGNATURE=n \
+    && make KVER=${kernel_version} install \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_MODULE_SIG_ALL=n \
+    && make KVER=${kernel_version} uninstall \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_MODULE_SIG_ALL=n \
+    && rm -rf ${repo_path}/*
 COPY . .
 
 # Workqueue - use the system WQ
-RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
-        CONFIG_BOSCH_ICCOM=m \
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+		CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM \
-    && rm -rf /repos/iccom/*
+        CONFIG_CHECK_SIGNATURE=n \
+    && make KVER=${kernel_version} install \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM \
+        CONFIG_MODULE_SIG_ALL=n \
+    && make KVER=${kernel_version} uninstall \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM \
+        CONFIG_MODULE_SIG_ALL=n \
+    && rm -rf ${repo_path}/*
 COPY . .
 
 # Workqueue - use the system high prio WQ
-RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
-        CONFIG_BOSCH_ICCOM=m \
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+		CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM_HIGHPRI \
-    && rm -rf /repos/iccom/*
+        CONFIG_CHECK_SIGNATURE=n \
+    && make KVER=${kernel_version} install \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM_HIGHPRI \
+        CONFIG_MODULE_SIG_ALL=n \
+    && make KVER=${kernel_version} uninstall \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM_HIGHPRI \
+        CONFIG_MODULE_SIG_ALL=n \
+    && rm -rf ${repo_path}/*
 COPY . .
 
 # Workqueue - use the private highprio WQ
-RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
-        CONFIG_BOSCH_ICCOM=m \
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+		CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=PRIVATE \
-    && rm -rf /repos/iccom/*
+        CONFIG_CHECK_SIGNATURE=n \
+    && make KVER=${kernel_version} install \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=PRIVATE \
+        CONFIG_MODULE_SIG_ALL=n \
+    && make KVER=${kernel_version} uninstall \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=PRIVATE \
+        CONFIG_MODULE_SIG_ALL=n \
+    && rm -rf ${repo_path}/*
 COPY . .
+
 
 # Debug with embedded defaults
-RUN make -C /lib/modules/5.15.0-25-generic/build M=/repos/iccom \
-        CONFIG_BOSCH_ICCOM=m \
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+		CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_DEBUG=y \
-    && rm -rf /repos/iccom/*
+        CONFIG_CHECK_SIGNATURE=n \
+    && make KVER=${kernel_version} install \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_DEBUG=y \
+        CONFIG_MODULE_SIG_ALL=n \
+    && make KVER=${kernel_version} uninstall \
+		CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_DEBUG=y \
+        CONFIG_MODULE_SIG_ALL=n \
+    && rm -rf ${repo_path}/*
 COPY . .
-

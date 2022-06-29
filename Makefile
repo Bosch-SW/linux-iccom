@@ -1,42 +1,39 @@
-#
-# Makefile for Bosch Inter Chip
-# Communication driver
-#
+# Bosch ICCom Driver Makefile
 
-KDIR ?= /lib/modules/`uname -r`/build
+KVER ?= `uname -r`
+KDIR ?= /lib/modules/${KVER}/build
 
-ccflags-y := -Iinclude/linux -std=gnu99 -Wno-declaration-after-statement
+.PHONY: test install uninstall docker-image
 
+# Build on current machine with given (current kernel by default) kernel
 default:
-	$(MAKE) -C $(KDIR) M=$$PWD
+	$(MAKE) -C $(KDIR) M=$$PWD \
+		CONFIG_BOSCH_ICCOM=m
 
+# Install to current machine
+install:
+	$(MAKE) -C $(KDIR) M=$$PWD modules_install
+	cp $$PWD/include/linux/iccom.h \
+		/usr/src/linux-headers-${KVER}/include/linux/iccom.h
 
-====
+# Try to remove the installed driver from current machine
+uninstall:
+	rm -f /usr/src/linux-headers-${KVER}/include/linux/iccom.h
+	rm -f /lib/modules/${KVER}/extra/src/iccom.ko
 
-ccflags-$(CONFIG_BOSCH_ICCOM_DEBUG) += -DICCOM_DEBUG
-ifeq ($(CONFIG_BOSCH_ICCOM_DEBUG), y)
-    ccflags-y += -DDICCOM_DEBUG_CHANNEL=$(CONFIG_BOSCH_ICCOM_DEBUG_CHANNEL)
-    ccflags-y += -DICCOM_DEBUG_MESSAGES_PRINTOUT_MAX_COUNT=$(CONFIG_BOSCH_ICCOM_DEBUG_MESSAGES_PRINTOUT_MAX_COUNT)
-    ccflags-y += -DICCOM_DEBUG_PACKAGES_PRINTOUT_MAX_COUNT=$(CONFIG_BOSCH_ICCOM_DEBUG_PACKAGES_PRINTOUT_MAX_COUNT)
-endif
+# Build Docker deployed image (Docker image with built and installed ICCom)
+docker-image:
+	cd $$PWD && sudo -u `whoami` docker build -t linux-iccom \
+		-f ./Dockerfile.docker-image . \
+		&& echo "docker-image: \033[0;32mOK\033[0m"
 
-# ICCom consumer data delivery work queue configuration
-ifeq (${CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE}, "SYSTEM")
-    ccflags-y += -DICCOM_WORKQUEUE_MODE=ICCOM_WQ_SYSTEM
-else ifeq (${CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE}, "SYSTEM_HIGHPRI")
-    ccflags-y += -DICCOM_WORKQUEUE_MODE=ICCOM_WQ_SYSTEM_HIGHPRI
-else ifeq (${CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE}, "PRIVATE")
-    ccflags-y += -DICCOM_WORKQUEUE_MODE=ICCOM_WQ_PRIVATE
-endif
+# Test ourselves in Docker environment (similar to docker-image, but
+# usually builds various build configurations and if all fine, just removes
+# the build artifacts)
+test:
+	cd $$PWD && sudo -u `whoami` docker build . \
+		&& echo "test: \033[0;32mOK\033[0m"
 
-#obj-$(CONFIG_BOSCH_ICCOM) += iccom.o
-obj-m += iccom.o
-ifeq ($(CONFIG_BOSCH_ICCOM_TEST_MODULE), y)
-    obj-m += iccom_test.o
-endif
-
-obj-$(CONFIG_BOSCH_ICCOM_SOCKETS) += iccom_socket_if.o
-
-# Custom protocol aggregator drivers
-obj-$(CONFIG_BOSCH_ICCOM_EXAMPLE) += iccom-example.o
-obj-$(CONFIG_BOSCH_ICCOM_TRANSPORT_MIRROR_V1) += iccom-transport-mirror-v1.o
+# combines both: `test` and `docker-image` target
+base: docker-image test
+	echo "base: \033[0;32mOK\033[0m"
