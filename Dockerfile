@@ -31,7 +31,7 @@ COPY . .
 ### TEST BUILDS CONFIGURATIONS ###
 
 # Base (default) version
-ARG kernel_version=5.15.0-25-generic
+ARG kernel_version=5.4.0-97-generic
 ARG kernel_source_dir=/lib/modules/${kernel_version}/build
 
 # Default build

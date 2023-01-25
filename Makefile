@@ -1,6 +1,9 @@
 # Bosch ICCom Driver Makefile
 
-KVER ?= `uname -r`
+# We fix the kernel version to make the build reproducible
+# NOTE: if you change it here and then use in docker, you will
+# 		need to rebuild the docker images we inherit from
+KVER ?= 5.4.0-97-generic
 KDIR ?= /lib/modules/${KVER}/build
 
 .PHONY: test install uninstall docker-image
@@ -23,15 +26,16 @@ uninstall:
 
 # Build Docker deployed image (Docker image with built and installed ICCom)
 docker-image:
-	cd $$PWD && sudo -u `whoami` docker build -t linux-iccom \
-		-f ./Dockerfile.docker-image . \
+	cd $$PWD && scripts/docker_build_wrapper.sh 	\
+		 			-t linux-iccom 					\
+		            -f ./Dockerfile.docker-image . 	\
 		&& echo "docker-image: \033[0;32mOK\033[0m"
 
 # Test ourselves in Docker environment (similar to docker-image, but
 # usually builds various build configurations and if all fine, just removes
 # the build artifacts)
 test:
-	cd $$PWD && sudo -u `whoami` docker build . \
+	cd $$PWD && scripts/docker_build_wrapper.sh   . \
 		&& echo "test: \033[0;32mOK\033[0m"
 
 # combines both: `test` and `docker-image` target
