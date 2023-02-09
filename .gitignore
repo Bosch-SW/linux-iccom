@@ -1,3 +1,18 @@
 # vim swap files
 *.swo
 *.swp
+
+# kernel build files
+*.ko
+*.o
+*.cmd
+*.symvers
+*.o.d
+*.o.cmd
+*.order
+*.ko.cmd
+*.mod
+*.mod.c
+
+# python files
+__pycache__

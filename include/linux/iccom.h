@@ -43,6 +43,18 @@
 // size of data acknoledgement xfer in bytes
 #define ICCOM_ACK_XFER_SIZE_BYTES 1
 
+#define MAX_CHARACTERS                        50U
+#define CHARACTERS_PER_BYTE                   4U
+
+// Describes the dummy transport data
+//
+// @full_duplex_sym_iface {ptr valid} full duplex interface
+// @xfer_device_data {ptr valid} dummy transport device
+struct dummy_transport_data
+{
+        struct full_duplex_sym_iface * duplex_iface;
+        struct xfer_device_data *xfer_dev_data; 
+};
 
 // The message ready for customer layer callback type.
 //      @channel {valid channel number} the channel in which ready
@@ -108,6 +120,43 @@ int iccom_init_binded(
                 , void *full_duplex_device);
 void iccom_close_binded(struct iccom_dev *iccom);
 bool iccom_is_running(struct iccom_dev *iccom);
+
+
+/* ------------------ FULL DUPLEX API DECLARATIONS ---------------------*/
+
+// Describes the transport device data
+//
+// @tx_xfer contains the data transmitted from transport
+//      to iccom
+// @rx_xfer contains the data received in transport 
+//      from iccom
+// @next_xfer_id contains the next xfer id 
+//      to be transmitted
+// @running contains the status whether transport
+//      is running or not
+// @finishing contains the status whether transport
+//      is finishing its work
+struct xfer_device_data {
+        struct full_duplex_xfer tx_xfer;
+        struct full_duplex_xfer rx_xfer;
+        int next_xfer_id;
+        bool running;
+        bool finishing;
+};
+
+__maybe_unused
+int data_xchange(void __kernel *device
+                , struct __kernel full_duplex_xfer *xfer
+                , bool force_size_change);
+int default_data_update(void __kernel *device
+                , struct full_duplex_xfer *xfer
+                , bool force_size_change);
+bool is_running(void __kernel *device);
+int init(void __kernel *device
+                , struct full_duplex_xfer *default_xfer);
+int close(void __kernel *device);
+int reset(void __kernel *device
+                , struct full_duplex_xfer *default_xfer);
 
 #define ICCOM_HEADER
 
