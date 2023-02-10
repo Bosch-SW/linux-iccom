@@ -45,6 +45,7 @@
 
 #define MAX_CHARACTERS                        50U
 #define CHARACTERS_PER_BYTE                   4U
+#define MAX_CHANNEL_MSG_ALLOWED               50U
 
 // Describes the dummy transport data
 //
@@ -74,6 +75,29 @@ typedef bool (*iccom_msg_ready_callback_ptr_t)( unsigned int channel
                   , void *msg_data, size_t msg_len
                   , void *consumer_data);
 
+// Describes the sysfs channels from iccom
+//
+// @channel_id {number} contains the channel identification
+// @sysfs_channel_msgs_head channels messages list head
+// @list list_head for pointing to next channel
+struct sysfs_channel {
+        unsigned int channel_id;
+        unsigned int number_of_msgs;
+        struct list_head sysfs_channel_msgs_head;
+        struct list_head list;
+};
+
+// Describes the channels messages received from iccom to upper layer
+//
+// @data {ptr valid} contains the message received from iccom
+// @size {number} number of characters in the message
+// @list list_head for pointing to next previous message
+struct sysfs_channel_msg {
+        char *data;
+        size_t size;
+        struct list_head list;
+};
+
 // Describes the ICCom data
 // @p {any} pointer to iccom_dev_private data. This pointer is managed
 //      by iccom_dev. The pointed struct is also managed by iccom device.
@@ -82,12 +106,15 @@ typedef bool (*iccom_msg_ready_callback_ptr_t)( unsigned int channel
 //      pointer is passed to methods, defined by @xfer_iface.
 // @xfer_iface the structure which provides pointers to
 //      transport methods of the device, provided by @xfer_device.
+// @sysfs_channels_head the list which shall hold the user space channels
+//      received data from iccom received from transport to send to upper layers
 struct iccom_dev {
         struct iccom_dev_private *p;
 
         void *xfer_device;
         struct full_duplex_sym_iface xfer_iface;
         struct kobject* channels_root;
+        struct list_head sysfs_channels_head;
 };
 
 /* ------------------ KERNEL SPACE API DECLARATIONS ---------------------*/

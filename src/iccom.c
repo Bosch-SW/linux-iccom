@@ -662,6 +662,8 @@ struct iccom_message_storage_channel
 //          data writing/copying unlocked.
 //          (this implies that consumer guarantees that no concurrent
 //          calls to the same channel will happen)
+// @parent_iccom_dev the pointer for the iccom_dev
+//       to be used for sysfs callback message delivery
 // @message_ready_global_callback {NULL || valid callback pointer}
 //      points to the consumer global callback, which is called every
 //      time when channel doesn't have a dedicated channel callback
@@ -674,6 +676,8 @@ struct iccom_message_storage
 {
 	struct list_head channels_list;
 	struct mutex lock;
+
+	struct iccom_dev* parent_iccom_dev;
 
 	iccom_msg_ready_callback_ptr_t message_ready_global_callback;
 	void *global_consumer_data;
@@ -1783,6 +1787,112 @@ static void __iccom_msg_storage_free_channel(
 	return;
 }
 
+// Add a sysfs_channel_msg to the channel msgs list
+// in a specific channel
+//
+// @channel_entry {valid prt} channel where the message
+// shall be stored
+// @input_data {ptr valid} data to be copy
+// @data_size {number} dize of bytes to copy
+void __add_sysfs_channel_msg_to_channel(
+                struct sysfs_channel *channel_entry,
+                char * input_data, size_t data_size) {
+        struct sysfs_channel_msg * channel_msg_entry = NULL;
+
+        if(channel_entry == NULL) {
+                return;
+        }
+
+        channel_msg_entry = (struct sysfs_channel_msg *)
+                        kzalloc(sizeof(struct sysfs_channel_msg), GFP_KERNEL);
+        if(channel_msg_entry == NULL) {
+                return;
+        }
+
+        channel_msg_entry->data = (char *) kmalloc(data_size, GFP_KERNEL);
+        if(!channel_msg_entry->data) {
+                kfree(channel_msg_entry);
+                return;
+        }
+
+        channel_entry->number_of_msgs++;
+        memcpy(channel_msg_entry->data, input_data, data_size);
+        channel_msg_entry->size = data_size;
+        list_add(&channel_msg_entry->list, &channel_entry->sysfs_channel_msgs_head);
+}
+
+// Routine to store a channel message 
+// to be later on provided to userspace
+//
+// @iccom_dev_p {valid prt} iccom_dev pointer
+// @channel_id {number} iccom device channel id
+// @input_data {valid prt} data to be copied
+// @data_size {number} size of data to be copied
+void __store_sysfs_channel_msg(
+                struct iccom_dev *iccom_dev_p, unsigned int channel_id,
+                char * input_data, size_t data_size) {
+        struct sysfs_channel *channel_entry, *tmp = NULL;
+        
+        if(input_data == NULL || data_size <= 0) {
+                return;
+        }
+        
+        list_for_each_entry_safe(channel_entry, tmp,
+                                &iccom_dev_p->sysfs_channels_head, list) {
+                if(channel_entry->channel_id == channel_id) {
+                        if(channel_entry->number_of_msgs >= MAX_CHANNEL_MSG_ALLOWED) {
+                                iccom_err("Discarding message as channel %d with size %ld message %s",
+                                                 channel_id, data_size, input_data);
+                                return;
+                        }
+                        __add_sysfs_channel_msg_to_channel(channel_entry,
+                                                         input_data, data_size);
+                        return;
+                }
+        }
+}
+
+// ICCom callback to signal a full message received from
+// transport to be sent to a consumer
+//
+// @channel {number} number of the channel
+// @msg_data {valid ptr} message data
+// @msg_len {number} message length
+// @consumer_data {valid ptr} consumer pointer holding where the information
+//                            shall be sent to
+//
+// RETURNS:
+//      0: length of data is zero - no data
+//      > 0: data size of data to be showed in user space
+static bool sysfs_iccom_msg_received_callback(
+                struct iccom_dev* iccom_device, unsigned int channel,
+                char *msg_data, size_t msg_len) {
+        iccom_warning("Received from iccom for channel %d: %s", channel, msg_data);
+        __store_sysfs_channel_msg(iccom_device, channel, msg_data, msg_len);
+        return true;
+}
+
+// Checks whether sysfs channel is already
+// created
+//
+// @iccom_dev_p {valid prt} iccom_dev pointer
+// @channel_id {number} iccom device channel id
+//
+// RETURNS:
+//      true: channel already exists
+//      false: channel does not exists
+bool __is_sysfs_channel_present(
+                struct iccom_dev *iccom_dev_p, unsigned int channel_id) {
+        struct sysfs_channel *channel_entry, *tmp;
+        list_for_each_entry_safe(channel_entry, tmp,
+                        &iccom_dev_p->sysfs_channels_head, list) {
+                if(channel_entry->channel_id == channel_id) {
+                        return true;
+                }
+        }
+        return false;
+}
+
 // Notifies the channel consumer about all ready messages
 // in the channel (in FIFO sequence). Notified messages are
 // discarded from the channel if consumer callback
@@ -1814,17 +1924,21 @@ static int __iccom_msg_storage_pass_channel_to_consumer(
 		return -EINVAL;
 	}
 
-	iccom_msg_ready_callback_ptr_t msg_ready_callback;
-	void *callback_consumer_data;
+	iccom_msg_ready_callback_ptr_t msg_ready_callback = NULL;
+	void *callback_consumer_data = NULL;
 
 	mutex_lock(&storage->lock);
+
+        bool sysfs_channel_present = __is_sysfs_channel_present(
+                                        storage->parent_iccom_dev, channel_rec->channel);
+
 	if (!IS_ERR_OR_NULL(channel_rec->message_ready_callback)) {
 		msg_ready_callback = channel_rec->message_ready_callback;
 		callback_consumer_data = channel_rec->consumer_callback_data;
 	} else if (!IS_ERR_OR_NULL(storage->message_ready_global_callback)) {
 		msg_ready_callback = storage->message_ready_global_callback;
 		callback_consumer_data = storage->global_consumer_data;
-	} else {
+	} else if(sysfs_channel_present == false){
 		mutex_unlock(&storage->lock);
 		return 0;
 	}
@@ -1847,10 +1961,21 @@ static int __iccom_msg_storage_pass_channel_to_consumer(
 		mutex_unlock(&storage->lock);
 
 		count++;
-		bool ownership_to_consumer = msg_ready_callback(
-						 channel_rec->channel
-						 , msg->data, msg->length
-						 , callback_consumer_data);
+		bool ownership_to_consumer = false;
+
+		if(!IS_ERR_OR_NULL(msg_ready_callback) && !IS_ERR_OR_NULL(callback_consumer_data)) {
+			ownership_to_consumer = msg_ready_callback(
+							channel_rec->channel
+							, msg->data, msg->length
+							, callback_consumer_data);
+		}
+
+		if(sysfs_channel_present == true) {
+			sysfs_iccom_msg_received_callback(
+				storage->parent_iccom_dev, channel_rec->channel,
+				(char*)msg->data, msg->length);
+		}
+
 		if (ownership_to_consumer) {
 			msg->data = NULL;
 			msg->length = 0;
@@ -2510,6 +2635,7 @@ void iccom_msg_storage_clear(struct iccom_message_storage *storage)
 	mutex_unlock(&storage->lock);
 	storage->message_ready_global_callback = NULL;
 	storage->global_consumer_data = NULL;
+	storage->parent_iccom_dev = NULL;
 }
 
 // Cleans and frees whole storage (the struct itself it not freed).
@@ -2820,6 +2946,8 @@ static int iccom_msg_storage_init(
 	storage->uncommitted_finalized_count = 0;
 	storage->message_ready_global_callback = NULL;
 	storage->global_consumer_data = NULL;
+	storage->parent_iccom_dev = container_of(storage
+				, struct iccom_dev_private, rx_messages)->iccom;
 	return 0;
 }
 
@@ -4578,6 +4706,159 @@ EXPORT_SYMBOL(iccom_init_binded);
 EXPORT_SYMBOL(iccom_close_binded);
 EXPORT_SYMBOL(iccom_is_running);
 
+// Initializes the sysfs channels list
+//
+// @iccom_dev_p {valid prt} iccom_dev pointer
+void __initialize_sysfs_channels_list(struct iccom_dev *iccom_dev_p) {
+        INIT_LIST_HEAD(&iccom_dev_p->sysfs_channels_head);
+}
+
+// Initializes the sysfs channel msgs list
+//
+// @channel_entry {valid prt} sysfs channel entry
+void __initialize_sysfs_channel_msgs_list(
+                struct sysfs_channel * channel_entry) {
+        INIT_LIST_HEAD(&channel_entry->sysfs_channel_msgs_head);
+}
+
+// Destroy a list element (sysfs_channel_msg) from a
+// specific channel
+//
+// @channel_msg_entry {valid prt} sysfs channel msg entry
+void __destroy_sysfs_channel_msgs_list_entry(
+                struct sysfs_channel_msg *channel_msg_entry) {
+        if(channel_msg_entry != NULL) {
+                if(channel_msg_entry->data != NULL) {
+                        kfree(channel_msg_entry->data);
+                        channel_msg_entry->data = NULL;
+                }
+                channel_msg_entry->size = 0;
+                list_del(&channel_msg_entry->list);
+        }
+}
+
+// Destroy all list elements (sysfs_channel_msg) from a
+// specific channel
+//
+// @channel_entry {valid prt} sysfs channel entry
+void __destroy_sysfs_channel_msgs_list(struct sysfs_channel *channel_entry) {
+        struct sysfs_channel_msg *channel_msg_entry, *tmp;
+        if(channel_entry != NULL) {
+                list_for_each_entry_safe(channel_msg_entry, tmp, 
+                                &channel_entry->sysfs_channel_msgs_head, list) {
+                        __destroy_sysfs_channel_msgs_list_entry(channel_msg_entry);
+                }
+        }
+}
+
+// Destroy a list element (sysfs_channel) from a
+// iccom device
+//
+// @channel_entry {valid prt} sysfs channel entry
+void __destroy_sysfs_channels_list_entry(struct sysfs_channel *channel_entry) {
+        if(channel_entry != NULL) {
+                channel_entry->channel_id = -1;
+                channel_entry->number_of_msgs = 0;
+                __destroy_sysfs_channel_msgs_list(channel_entry);
+                list_del(&channel_entry->list);
+        }
+}
+
+// Destroy all list elements (sysfs_channel) from a
+// specific channel
+//
+// @iccom_dev_p {valid prt} iccom_dev pointer for device
+void __destroy_sysfs_channels_list(struct iccom_dev *iccom_dev_p) {
+        struct sysfs_channel *channel_entry, *tmp;
+        list_for_each_entry_safe(channel_entry, tmp,
+                                &iccom_dev_p->sysfs_channels_head, list) {
+                __destroy_sysfs_channels_list_entry(channel_entry);
+        }
+}
+
+// Routine for extracting a sysfs_channel_msg
+// from a specific channel and remove it from
+// the list for userspace
+//
+// @channel_entry {valid prt} channel where the message
+// is stored
+// @output_data {ptr valid} pointer where data shall be written to
+// @data_size {valid prt} size of the output data that was written
+void __get_and_clear_next_channel_msg_entry(
+                struct sysfs_channel *channel_entry, char * output_data,
+                size_t *data_size){
+  struct sysfs_channel_msg *channel_msg_entry, *tmp;
+        list_for_each_entry_safe_reverse(channel_msg_entry, tmp,
+                                &channel_entry->sysfs_channel_msgs_head, list) {
+                if(channel_msg_entry->data != NULL) {
+                        channel_entry->number_of_msgs--;
+                        memcpy(output_data, channel_msg_entry->data, channel_msg_entry->size);
+                        *data_size = channel_msg_entry->size;
+                        __destroy_sysfs_channel_msgs_list_entry(channel_msg_entry);
+                        return;
+                }
+        }
+}
+
+// Routine to retrieve a channel message 
+// and provide it to userspace
+//
+// @iccom_dev_p {valid prt} iccom_dev pointer
+// @channel_id {number} iccom device channel id
+// @output_data {valid prt} where the data shall be copied to
+// @data_size {valid prt} size of data copied
+void __get_sysfs_channel_msg(
+                struct iccom_dev *iccom_dev_p, unsigned int channel_id,
+                char * output_data, size_t *data_size) {
+        struct sysfs_channel *cursor, *tmp;
+        *data_size = 0;
+
+        list_for_each_entry_safe(cursor, tmp,
+                                &iccom_dev_p->sysfs_channels_head, list) {
+                if(cursor->channel_id == channel_id) {
+                        __get_and_clear_next_channel_msg_entry(cursor, output_data, data_size);
+                        return;
+                }
+        }
+}
+
+// Create a sysfs channel for a ICCom device
+//
+// @iccom_dev_p {valid prt} iccom_dev pointer
+// @channel_id {number} iccom device channel id
+void __create_sysfs_channel(
+                struct iccom_dev *iccom_dev_p, unsigned int channel_id) {
+        struct sysfs_channel * iccom_channel_entry = NULL;
+
+        if(__is_sysfs_channel_present(iccom_dev_p, channel_id) == true) {
+                return;
+        }
+
+        iccom_channel_entry = kzalloc(sizeof(struct sysfs_channel),GFP_KERNEL);
+
+        if(iccom_channel_entry != NULL) {
+                iccom_channel_entry->channel_id = channel_id;
+                iccom_channel_entry->number_of_msgs = 0;
+                __initialize_sysfs_channel_msgs_list(iccom_channel_entry);
+                list_add(&iccom_channel_entry->list, &iccom_dev_p->sysfs_channels_head);
+        }
+}
+
+// Destroy a sysfs channel for a ICCom device
+//
+// @iccom_dev_p {valid prt} iccom_dev pointer
+// @channel_id {number} iccom device channel id
+void __destroy_sysfs_channel(
+                struct iccom_dev *iccom_dev_p, unsigned int channel_id) {
+        struct sysfs_channel *channel_entry, *tmp;
+        list_for_each_entry_safe(channel_entry, tmp, &iccom_dev_p->sysfs_channels_head, list) {
+                if(channel_entry->channel_id == channel_id) {
+                        __destroy_sysfs_channels_list_entry(channel_entry);
+                        return;
+                }
+        }
+}
+
 // ICCom version (show) class attribute used to know the git revision
 // that ICCom is at the moment
 //
@@ -4735,7 +5016,9 @@ static ssize_t transport_store(
                 goto iccom_init_failed;
         }
 
-        iccom_warning("Iccom transport device binding was sucessfull");
+
+
+        iccom_warning("Iccom device binding to transport device was sucessful");
         return count;
 
 iccom_init_failed:
@@ -4847,6 +5130,7 @@ static ssize_t channel_show(
         unsigned channel_id = 0;
         struct device *iccom_dev = NULL;
         struct iccom_dev *iccom_dev_data = NULL;
+        size_t data_size = 0;
 
         if(IS_ERR_OR_NULL(kobj->parent)) {
                 goto invalid_params;
@@ -4868,11 +5152,12 @@ static ssize_t channel_show(
                 goto invalid_params;
         }
 
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Name: %d", channel_id);
-        return 0;
+        __get_sysfs_channel_msg(iccom_dev_data, channel_id, buf, &data_size);
+
+        return data_size;
 
 invalid_params:
-        printk("channel show failed\n");
+        iccom_err("channel show failed\n");
         return 0;
 }
 
@@ -4988,8 +5273,12 @@ static ssize_t channels_ctl_store(
                 }
                 ret = sysfs_create_file(iccom_dev_data->channels_root,
                                                         &channel_attr.attr);
-                iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                        "Channel no. %d, result %d",ch_num,ret);
+                if(ret == 0) {
+                        __create_sysfs_channel(iccom_dev_data, ch_num);
+                        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+                                "Channel no. %d, result %d",ch_num,ret);
+                }
+                
         }
         else if(opt == 'd') {
                 knode = sysfs_get_dirent(iccom_dev_data->channels_root->sd,name);
@@ -4997,6 +5286,7 @@ static ssize_t channels_ctl_store(
                         goto channel_not_found;
                 }
                 sysfs_remove_file(iccom_dev_data->channels_root,&channel_attr.attr);
+                __destroy_sysfs_channel(iccom_dev_data, ch_num);
                 iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
                                 "Destroyed channel %d",ch_num);
         }
@@ -5086,6 +5376,8 @@ static int iccom_probe(struct platform_device *pdev) {
 
         dev_set_drvdata(&pdev->dev, iccom_dev_data);
 
+        __initialize_sysfs_channels_list(iccom_dev_data);
+
         // Create channels directory
         iccom_dev_data->channels_root = 
                 kobject_create_and_add(SYSFS_CHANNEL_ROOT, &(pdev->dev.kobj));
@@ -5126,6 +5418,7 @@ static int iccom_remove(struct platform_device *pdev) {
         }
 
         iccom_close_binded(iccom_dev_data);
+        __destroy_sysfs_channels_list(iccom_dev_data);
         kobject_put(iccom_dev_data->channels_root);
         kfree(iccom_dev_data);
         iccom_dev_data = NULL;
