@@ -87,6 +87,7 @@ struct iccom_dev {
 
         void *xfer_device;
         struct full_duplex_sym_iface xfer_iface;
+        struct kobject* channels_root;
 };
 
 /* ------------------ KERNEL SPACE API DECLARATIONS ---------------------*/

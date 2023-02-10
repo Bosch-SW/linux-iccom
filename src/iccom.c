@@ -289,6 +289,9 @@ struct ida dummy_transport_device_id;
 #define ICCOM_BUFFER_SIZE ICCOM_ACK_XFER_SIZE_BYTES
 #endif
 
+#define SYSFS_CHANNEL_ROOT "channels"
+#define SYSFS_CHANNEL_PERMISSIONS 0644
+
 /* --------------------- DATA PACKAGE CONFIGURATION ---------------------*/
 
 // unused payload space filled with this value
@@ -4828,13 +4831,203 @@ invalid_params:
 
 static DEVICE_ATTR_RO(statistics);
 
+// Channel (show) attribute, for reading data
+// written to the channel
+//
+// @kobj {valid ptr} channel kobject instance
+// @attr {valid ptr} kobject attribute properties
+// @buf {valid ptr} buffer to read input from user space
+//
+// RETURNS:
+// 0: length of data is zero - no data
+// > 0: data size of data to be showed in user space
+static ssize_t channel_show(
+                struct kobject *kobj, struct kobj_attribute *attr, char *buf) {
+
+        unsigned channel_id = 0;
+        struct device *iccom_dev = NULL;
+        struct iccom_dev *iccom_dev_data = NULL;
+
+        if(IS_ERR_OR_NULL(kobj->parent)) {
+                goto invalid_params;
+        }
+
+        iccom_dev = kobj_to_dev(kobj->parent);
+
+        if(IS_ERR_OR_NULL(iccom_dev)) {
+                goto invalid_params;
+        }
+
+        iccom_dev_data = (struct iccom_dev*)dev_get_drvdata(iccom_dev);
+
+        if(IS_ERR_OR_NULL(iccom_dev_data)) {
+                goto invalid_params;
+        }
+
+        if(kstrtouint(attr->attr.name,10,&channel_id) != 0) {
+                goto invalid_params;
+        }
+
+        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Name: %d", channel_id);
+        return 0;
+
+invalid_params:
+        printk("channel show failed\n");
+        return 0;
+}
+
+// Channel (store) attribute, for writing data
+// to a channel
+//
+// @kobj {valid ptr} channel kobject instance
+// @attr {valid ptr} class attribute properties
+// @buf {valid ptr} buffer to read input from user space
+// @count {number} size of buffer from user spac\e
+//
+// RETURNS:
+// count: all data processed
+static ssize_t channel_store(
+                struct kobject *kobj, struct kobj_attribute *attr,
+                const char *buf, size_t count) {
+
+        int ret;
+        unsigned channel_id = 0;
+        char *simulationData = NULL;
+        struct device *device = NULL;
+        struct iccom_dev *iccom_dev_data = NULL;
+
+        ret = kstrtouint(attr->attr.name, 10, &channel_id);
+
+        if(ret != 0) {
+                goto invalid_params;
+        }
+
+        if(IS_ERR_OR_NULL(kobj->parent)) {
+                goto invalid_params;
+        }
+
+        device = kobj_to_dev(kobj->parent);
+
+        if(IS_ERR_OR_NULL(device)) {
+                goto invalid_params;
+        }
+
+        iccom_dev_data = (struct iccom_dev *)dev_get_drvdata(device);
+
+        if(IS_ERR_OR_NULL(iccom_dev_data)) {
+                goto invalid_params;
+        }
+
+        simulationData = (char *) kmalloc(count, GFP_KERNEL);
+
+        if(IS_ERR_OR_NULL(simulationData)) {
+                goto invalid_params;
+        }
+
+        memcpy(simulationData, buf, count);
+
+        ret = iccom_post_message(
+                iccom_dev_data,
+                simulationData,
+                count,
+                channel_id,
+                1);
+
+        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+                "Sent to iccom for channel %d: with result %d: and data: %s",
+                channel_id, ret, simulationData);
+
+        kfree(simulationData);
+
+        return count;
+
+invalid_params:
+        iccom_err("channel show failed");
+        return -EFAULT;
+}
+
+// Channel control (store) attribute, for creating or
+// destroying channel instances
+//
+// @dev {valid ptr} iccom device
+// @attr {valid ptr} class attribute properties
+// @buf {valid ptr} buffer to read input from user space
+// @count {number} size of buffer from user spac\e
+//
+// RETURNS:
+// count: all data processed
+static ssize_t channels_ctl_store(
+                struct device *dev, struct device_attribute *attr,
+                const char *buf, size_t count) {
+
+        char opt;
+        int ret;
+        int ch_num;
+        static char name[3];
+        struct iccom_dev *iccom_dev_data = NULL;
+        struct kernfs_node* knode = NULL;
+        
+        if(2 != sscanf(buf,"%c %d", &opt, &ch_num)) {
+                goto invalid_params;
+        }
+
+        sprintf(name,"%d",ch_num);
+
+        iccom_dev_data = (struct iccom_dev *)dev_get_drvdata(dev);
+
+        static struct kobj_attribute channel_attr = {
+                .attr = { .name = name, .mode = SYSFS_CHANNEL_PERMISSIONS },
+                .show = channel_show,
+                .store = channel_store,
+        };
+
+        if(opt == 'c') {
+                knode = sysfs_get_dirent(iccom_dev_data->channels_root->sd,name);
+                if(!IS_ERR_OR_NULL(knode)) {
+                        goto channel_already_exists;
+                }
+                ret = sysfs_create_file(iccom_dev_data->channels_root,
+                                                        &channel_attr.attr);
+                iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+                        "Channel no. %d, result %d",ch_num,ret);
+        }
+        else if(opt == 'd') {
+                knode = sysfs_get_dirent(iccom_dev_data->channels_root->sd,name);
+                if(IS_ERR_OR_NULL(knode)) {
+                        goto channel_not_found;
+                }
+                sysfs_remove_file(iccom_dev_data->channels_root,&channel_attr.attr);
+                iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+                                "Destroyed channel %d",ch_num);
+        }
+        else {
+                goto invalid_params;
+        }
+
+        return count;
+
+invalid_params:
+        iccom_err("Invalid parameters");
+        return -EFAULT;
+channel_not_found:
+        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Channel %d not found",ch_num);
+        return -EINVAL;
+channel_already_exists:
+        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Channel %d already exists.",ch_num);
+        return -EINVAL;
+}
+
+static DEVICE_ATTR_WO(channels_ctl);
+
 // List of all ICCom device attributes
 //
 // @dev_attr_transport the ICCom transport file
 // @dev_attr_statistics the ICCom statistics file
+// @dev_attr_channels_ctl the ICCOM channels file
 static struct attribute *iccom_dev_attrs[] = {
         &dev_attr_transport.attr,
         &dev_attr_statistics.attr,
+        &dev_attr_channels_ctl.attr,
         NULL,
 };
 
@@ -4893,6 +5086,10 @@ static int iccom_probe(struct platform_device *pdev) {
 
         dev_set_drvdata(&pdev->dev, iccom_dev_data);
 
+        // Create channels directory
+        iccom_dev_data->channels_root = 
+                kobject_create_and_add(SYSFS_CHANNEL_ROOT, &(pdev->dev.kobj));
+
         return 0;
 
 invalid_params:
@@ -4929,6 +5126,7 @@ static int iccom_remove(struct platform_device *pdev) {
         }
 
         iccom_close_binded(iccom_dev_data);
+        kobject_put(iccom_dev_data->channels_root);
         kfree(iccom_dev_data);
         iccom_dev_data = NULL;
 
@@ -5377,9 +5575,174 @@ void encode_iccom_to_transport_data(
         }
 }
 
+// Transport device R (show) attribute for checking if
+// what data has been transmitted from ICCom to Transport
+//
+// @dev {valid ptr} Transport device
+// @attr {valid ptr} device attribute properties
+// @buf {valid ptr} buffer to write output to user space
+//
+// RETURNS:
+//      0: length of data is zero - no data
+//      > 0: data size of data to be showed in user space
+static ssize_t R_show(
+                struct device *dev, struct device_attribute *attr, char *buf) {
+        size_t buffer_size = 0;
+        struct xfer_device_data *xfer_dev_data = NULL;
+        struct dummy_transport_data * transport_dev_data = NULL;
+
+        transport_dev_data = (struct dummy_transport_data *)dev_get_drvdata(dev);
+
+        if(IS_ERR_OR_NULL(transport_dev_data)) {
+                goto invalid_params;
+        }
+
+        xfer_dev_data = transport_dev_data->xfer_dev_data;
+
+        if(IS_ERR_OR_NULL(xfer_dev_data)) {
+                goto invalid_params;
+        }
+
+        encode_iccom_to_transport_data(
+                buf, &buffer_size, (uint8_t*)xfer_dev_data->rx_xfer.data_tx,
+                xfer_dev_data->rx_xfer.size_bytes);
+
+        return buffer_size;
+
+invalid_params:
+        return sprintf(buf, "Reading iccom device data sent to transport failed!");
+}
+
+static DEVICE_ATTR_RO(R);
+
+// Transport device W (store) attribute for writing
+// data from userspace to the transport
+//
+// @dev {valid ptr} Transport device
+// @attr {valid ptr} device attribute properties
+// @buf {valid ptr} buffer with the data from user space
+// @count {number} size of buffer from user space
+//
+// RETURNS:
+//      count: all data processed
+static ssize_t W_store(
+                struct device *dev, struct device_attribute *attr,
+                const char *buf, size_t count) {
+        struct xfer_device_data *xfer_dev_data = NULL;
+        struct dummy_transport_data * transport_dev_data  = NULL;
+        char data_transport_to_iccom[ICCOM_DATA_XFER_SIZE_BYTES];
+        size_t data_transport_to_iccom_size = 0;
+        bool decoding_state;
+
+        transport_dev_data = (struct dummy_transport_data *)dev_get_drvdata(dev);
+
+        if(IS_ERR_OR_NULL(transport_dev_data)) {
+                goto invalid_params;
+        }
+
+        xfer_dev_data = transport_dev_data->xfer_dev_data;
+
+        if(IS_ERR_OR_NULL(xfer_dev_data)) {
+                goto invalid_params;
+        }
+
+        decoding_state = decode_transport_to_iccom_data(buf, count, 
+                                                        data_transport_to_iccom,
+                                                        &data_transport_to_iccom_size);
+
+        if(decoding_state == false) {
+                goto decoding_failed;
+        }
+
+        write_transport_data_to_buffer(
+                xfer_dev_data, data_transport_to_iccom, data_transport_to_iccom_size);
+        iccom_transport_exchange_data(xfer_dev_data);
+        return count;
+
+decoding_failed:
+        iccom_warning("Transport Device Decoding failed!");
+        return -EINVAL;
+invalid_params:
+        iccom_warning("Transport Device Write data to iccom device failed!");
+        return -EFAULT;
+}
+
+static DEVICE_ATTR_WO(W);
+
+// Show RW (store) attribute, for creating
+// or destroying the R and W files on
+// transport
+//
+// @dev {valid ptr} iccom device
+// @attr {valid ptr} class attribute properties
+// @buf {valid ptr} buffer to read input from user space
+// @count {number} size of buffer from user space
+//
+// RETURNS:
+// count: all data processed
+static ssize_t showRW_ctl_store(
+                struct device *dev, struct device_attribute *attr,
+                const char *buf, size_t count) {
+        unsigned int result;
+
+        int ret = kstrtouint(buf,10,&result);
+        if(ret < 0 || (result > 2))
+                goto invalid_params;
+
+        struct kernfs_node* knode_R = sysfs_get_dirent(dev->kobj.sd,"R");
+        struct kernfs_node* knode_W = sysfs_get_dirent(dev->kobj.sd,"W");
+
+        if(result == 1) {
+                // Create RW files
+                if(knode_R != NULL || knode_W != NULL)
+                        goto RW_exists;
+
+                ret = device_create_file(dev,&dev_attr_R);
+                if(ret != 0)
+                        goto error;
+
+                ret = device_create_file(dev,&dev_attr_W);
+                if(ret != 0) {
+                        device_remove_file(dev,&dev_attr_R);
+                        goto error;
+                }
+
+                iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Created R/W");
+        }
+        else {
+                // Remove RW files
+                if(IS_ERR_OR_NULL(knode_R) || IS_ERR_OR_NULL(knode_W))
+                        goto RW_dont_exist;
+
+                device_remove_file(dev,&dev_attr_R);
+                device_remove_file(dev,&dev_attr_W);
+
+                iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Destroying R/W files");
+        }
+
+        return count;
+
+invalid_params:
+        iccom_err("Invalid parameters");
+        return -EFAULT;
+RW_exists:
+        iccom_err("Files already exist");
+        return -EINVAL;
+RW_dont_exist:
+        iccom_err("Files don't exist");
+        return -EINVAL;
+error:
+        iccom_err("Error creating files");
+        return count;
+}
+
+static DEVICE_ATTR_WO(showRW_ctl);
+
 // List of all Transport device attributes
 //
+// @dev_attr_showRW_ctl the Transport file to create/delete the R and W files
 static struct attribute *dummy_transport_dev_attrs[] = {
+        &dev_attr_showRW_ctl.attr,
         NULL,
 };
 
