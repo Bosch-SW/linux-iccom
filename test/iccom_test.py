@@ -220,9 +220,6 @@ if __name__ == '__main__':
         #Test #4
         iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(dummy_transport_device[3], iccom_device[3])
 
-        print(execute_command_with_result("dmesg"))
-
         ## iccom py end
         print("Removing iccom.ko ..")
-        execute_command_with_result("ls && pwd")
-        execute_command("rmmod /modules/iccom.ko")
+        execute_command("rmmod iccom.ko")
