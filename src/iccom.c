@@ -1867,7 +1867,7 @@ void __store_sysfs_channel_msg(
 static bool sysfs_iccom_msg_received_callback(
                 struct iccom_dev* iccom_device, unsigned int channel,
                 char *msg_data, size_t msg_len) {
-        iccom_warning("Received from iccom for channel %d: %s", channel, msg_data);
+        iccom_warning("Received from iccom for channel %d message '%s' size %d", channel, msg_data, msg_len);
         __store_sysfs_channel_msg(iccom_device, channel, msg_data, msg_len);
         return true;
 }
@@ -4973,7 +4973,7 @@ static ssize_t transport_store(
                                 (struct iccom_dev *)dev_get_drvdata(dev);
         struct dummy_transport_data * dummyDeviceData = NULL;
         struct device *dummy_transport_device = NULL;
-        char device_name[MAX_CHARACTERS];
+        char device_name[MAX_CHARACTERS + 1];
         int ret;
 
         if(IS_ERR_OR_NULL(iccom_dev_data)) {
@@ -4989,6 +4989,7 @@ static ssize_t transport_store(
         }
 
         memcpy(device_name, buf, count);
+        device_name[count] = '\0';
 
         dummy_transport_device = 
                 bus_find_device_by_name(&platform_bus_type, NULL, device_name);
@@ -5167,7 +5168,7 @@ invalid_params:
 // @kobj {valid ptr} channel kobject instance
 // @attr {valid ptr} class attribute properties
 // @buf {valid ptr} buffer to read input from user space
-// @count {number} size of buffer from user spac\e
+// @count {number} size of buffer from user space
 //
 // RETURNS:
 // count: all data processed
@@ -5204,7 +5205,7 @@ static ssize_t channel_store(
         }
 
         simulationData = (char *) kmalloc(count, GFP_KERNEL);
-
+        
         if(IS_ERR_OR_NULL(simulationData)) {
                 goto invalid_params;
         }
@@ -5237,7 +5238,7 @@ invalid_params:
 // @dev {valid ptr} iccom device
 // @attr {valid ptr} class attribute properties
 // @buf {valid ptr} buffer to read input from user space
-// @count {number} size of buffer from user spac\e
+// @count {number} size of buffer from user space
 //
 // RETURNS:
 // count: all data processed
@@ -5739,6 +5740,7 @@ int init(void __kernel *device, struct full_duplex_xfer *default_xfer) {
         DUMMY_TRANSPORT_DEV_TO_XFER_DEV_DATA;
         DUMMY_TRANSPORT_CHECK_DEVICE(device, return -ENODEV);
         xfer_init(&xfer_dev_data->tx_xfer);
+        xfer_init(&xfer_dev_data->rx_xfer);
         xfer_dev_data->next_xfer_id = 1;
         xfer_dev_data->finishing = false;
         xfer_dev_data->running = true;

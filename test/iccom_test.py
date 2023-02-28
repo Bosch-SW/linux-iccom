@@ -1,4 +1,55 @@
-from common import *
+import subprocess
+
+def execute_command(command):
+        subprocess.run(command, shell=True)
+
+def execute_command_with_result(command):
+        return subprocess.check_output(command, shell=True, text=True)
+
+def create_iccom_device():
+        command = "echo > /sys/class/iccom/create_device"
+        execute_command(command)
+
+def create_dummy_transport_device():
+        command = "echo > /sys/class/dummy_transport/create_transport"
+        execute_command(command)
+
+def link_dummy_transport_device_to_iccom_device(dummy_transport_device, iccom_device):
+        command = "echo {} > /sys/devices/platform/{}/transport".format(dummy_transport_device, iccom_device)
+        execute_command(command)
+
+def create_iccom_channel(iccom_device, channel):
+        command = "echo c{} > /sys/devices/platform/{}/channels_ctl".format(channel, iccom_device)
+        execute_command(command)
+
+def delete_channel(iccom_device, channel):
+        command = "echo d{} > /sys/devices/platform/{}/channels_ctl".format(channel, iccom_device)
+        execute_command(command)
+
+def send_iccom_data_to_transport(iccom_device, channel, message):
+        command = "echo {} > /sys/devices/platform/{}/channels/{}".format(message, iccom_device, channel)
+        execute_command(command)
+
+def receive_transport_data_to_iccom(iccom_device, channel):
+        command = "cat /sys/devices/platform/{}/channels/{}".format(iccom_device, channel)
+        return execute_command_with_result(command)
+
+def send_transport_data_to_iccom(dummy_transport_device, hex_str):
+        command = "echo {} > /sys/devices/platform/{}/W".format(hex_str, dummy_transport_device)
+        execute_command(command)
+
+def check_iccom_to_transport_next_xfer_data(dummy_transport_device):
+        command = "cat /sys/devices/platform/{}/R".format(dummy_transport_device)
+        return execute_command_with_result(command)
+
+def create_transport_device_RW_files(dummy_transport_device):
+        command = "echo 1 > /sys/devices/platform/{}/showRW_ctl".format(dummy_transport_device)
+        execute_command(command)
+
+def delete_transport_device_RW_files(dummy_transport_device):
+        command = "echo 0 > /sys/devices/platform/{}/showRW_ctl".format(dummy_transport_device)
+        execute_command(command)
+
 
 def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(dummy_transport_device, iccom_device):
 
@@ -29,9 +80,9 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(dummy_t
         string_received_data = receive_transport_data_to_iccom(iccom_device, "1")
 
         if(string_received_xfer == string_expected_xfer and string_received_data == string_expected_data):
-                print("TEST PASSED: " + test_name)
+                print("iccom_test_1.python: PASS")
         else:
-                print("TEST FAILED: " + test_name)
+                print("iccom_test_1.python: FAILED")
 
 def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(dummy_transport_device, iccom_device):
 
@@ -59,9 +110,9 @@ def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(dumm
         string_received = check_iccom_to_transport_next_xfer_data(dummy_transport_device)
 
         if(string_received == string_expected):
-                print("TEST PASSED: " + test_name)
+                print("iccom_test_2.python: PASS")
         else:
-                print("TEST FAILED: " + test_name)
+                print("iccom_test_2.python: FAILED")
 
 def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_payload_size(dummy_transport_device, iccom_device):
 
@@ -89,9 +140,9 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
         string_received = check_iccom_to_transport_next_xfer_data(dummy_transport_device)
 
         if(string_received == string_expected):
-                print("TEST PASSED: " + test_name)
+                print("iccom_test_3.python: PASS")
         else:
-                print("TEST FAILED: " + test_name)
+                print("iccom_test_3.python: FAILED")
 
 def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(dummy_transport_device, iccom_device):
 
@@ -116,6 +167,62 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(dummy_t
         string_received = check_iccom_to_transport_next_xfer_data(dummy_transport_device)
 
         if(string_received == string_expected):
-                print("TEST PASSED: " + test_name)
+                print("iccom_test_4.python: PASS")
         else:
-                print("TEST FAILED: " + test_name)
+                print("iccom_test_4.python: FAILED")
+
+if __name__ == '__main__':
+
+        #print("Mounting sys ..")
+        #execute_command("mount sysfs /sys -t sysfs")
+
+        print("Inserting iccom.ko ..")
+        execute_command("insmod /modules/iccom.ko")
+
+        # iccom py start
+
+        iccom_device = []
+        dummy_transport_device = []
+
+        iccom_device.append("iccom.0")
+        iccom_device.append("iccom.1")
+        iccom_device.append("iccom.2")
+        iccom_device.append("iccom.3")
+
+        dummy_transport_device.append("dummy_transport.0")
+        dummy_transport_device.append("dummy_transport.1")
+        dummy_transport_device.append("dummy_transport.2")
+        dummy_transport_device.append("dummy_transport.3")
+
+        ## Create iccom device instances
+        for x in iccom_device:
+                create_iccom_device()
+
+        # Create iccom device instances
+        for x in dummy_transport_device:
+                create_dummy_transport_device()
+
+        # Link tranport device to iccom
+        link_dummy_transport_device_to_iccom_device(dummy_transport_device[0], iccom_device[0])
+        link_dummy_transport_device_to_iccom_device(dummy_transport_device[1], iccom_device[1])
+        link_dummy_transport_device_to_iccom_device(dummy_transport_device[2], iccom_device[2])
+        link_dummy_transport_device_to_iccom_device(dummy_transport_device[3], iccom_device[3])
+
+        # Test #1
+        iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(dummy_transport_device[1], iccom_device[1])
+
+        # Test #2
+        iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(dummy_transport_device[0], iccom_device[0])
+
+        # Test #3
+        iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_payload_size(dummy_transport_device[2], iccom_device[2])
+
+        #Test #4
+        iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(dummy_transport_device[3], iccom_device[3])
+
+        print(execute_command_with_result("dmesg"))
+
+        ## iccom py end
+        print("Removing iccom.ko ..")
+        execute_command_with_result("ls && pwd")
+        execute_command("rmmod /modules/iccom.ko")

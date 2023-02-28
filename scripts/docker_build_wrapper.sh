@@ -55,7 +55,7 @@ fi
 # ensuring that socket is available even if we didn't start the agent
 # or if the value is outdated.
 if ! ssh-add -l; then
-    log "${YELLOW}Seems that you don't have a SSH_AUTH_SOCK broken. Fixing.${NC}"
+    log "${YELLOW}Seems that you don't have a SSH_AUTH_SOCK. Fixing.${NC}"
 
     for sk in `ls /tmp/ssh-*/agent.*`; do
         export SSH_AUTH_SOCK="${sk}"
