@@ -44,7 +44,6 @@
 #define ICCOM_ACK_XFER_SIZE_BYTES 1
 
 #define MAX_CHARACTERS                        50U
-#define CHARACTERS_PER_BYTE                   4U
 #define MAX_CHANNEL_MSG_ALLOWED               50U
 
 // Describes the dummy transport data

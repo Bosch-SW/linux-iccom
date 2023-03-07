@@ -1866,8 +1866,10 @@ void __store_sysfs_channel_msg(
 //      > 0: data size of data to be showed in user space
 static bool sysfs_iccom_msg_received_callback(
                 struct iccom_dev* iccom_device, unsigned int channel,
-                char *msg_data, size_t msg_len) {
-        iccom_warning("Received from iccom for channel %d message '%s' size %d", channel, msg_data, msg_len);
+                char *msg_data, size_t msg_len)
+{
+        iccom_warning("Received from iccom for channel %d message '%s' size %zu"
+		      , channel, msg_data, msg_len);
         __store_sysfs_channel_msg(iccom_device, channel, msg_data, msg_len);
         return true;
 }
@@ -5791,61 +5793,93 @@ int reset(void __kernel *device, struct full_duplex_xfer *default_xfer) {
 
 /*------------------- DUMMY TRANSPORT DEVICE ----------------------------*/
 
-// Decode the user space data received and convert
-// each four bytes (in char format 0xXX) to a number (one byte)
-// and write it in a new output table
+// Parse the hex string into a byte array.
 //
-// @buffer {valid ptr} buffer from user space
-// @buffer_size {number} size of buffer data
-// @data_transport_to_iccom {array} array to copy the data to
-// @data_transport_to_iccom_size {number} size of array
+// String must be a null-terminated string of 2-digit numbers (hex digits):
+// Example:
+// 		11030AFFDDCD\0
+// each 2-digit number will be converted to the byte value,
+// and the result will be written to the 
+//
+// NOTE: if parsing failed somewhere in the middle, then result is still
+// 	an error (so either all is fine or all failed, not inbetween)
+//
+// @str {valid ptr} buffer, containing the input null-terminated string
+// @str_len {number} length of string given by @str (in bytes)
+// 	**NOT** including the 0-terminator
+//
+// 	NOTE: if the @str_len is 0, then no parsing is done at all
+// 		function just returns.
+//
+// @bytearray__out {array} array to copy the data to
+// @out_size {>=0} size of the @bytearray__out in bytes
 //
 // RETURNS:
-//      true: ok
-//      false: failed
-bool decode_transport_to_iccom_data(
-                const char *buffer, const size_t buffer_size,
-                uint8_t data_transport_to_iccom[],
-                size_t *data_transport_to_iccom_size)
+//      >=0: the size of the data written to @bytearray__out
+//      <0: negated error code 
+ssize_t iccom_parse_hex_str(const char *str, const size_t str_len
+		, uint8_t *bytearray__out, size_t out_size)
 {
-        char data[CHARACTERS_PER_BYTE+1];
-        int ret = 0;
-        unsigned int auxiliarData = 0x0;
+    	// number of characters in the input string per one byte parsed
+	#define CHARS_PER_BYTE  2
 
-        /* Check if input fits in a xfer - considering '\0' */
-        if((((buffer_size-1) / CHARACTERS_PER_BYTE)) >
-                                         ICCOM_DATA_XFER_SIZE_BYTES) {
-                goto invalid_params;
-        }
+    	// to be "intelligent" we go for this check first
+	if (str_len == 0) {
+		return 0;
+	}
 
-        // Check whether input is multiple of four characters 0xXX + '\0' */
-        if(((buffer_size-1) % CHARACTERS_PER_BYTE) != 0) {
-                goto invalid_params;
-        }
+	// errors block
+	if (IS_ERR_OR_NULL(str)) {
+	    	iccom_err("broken string ptr.");
+		return -EINVAL;
+	}
+	if (str[str_len] != 0) {
+		iccom_err("string does not terminate with 0.");
+		return -EINVAL;
+	} 
+	if (IS_ERR_OR_NULL(bytearray__out)) {
+		iccom_err("bad output array ptr.");
+		return -EINVAL;
+	}
+	if (str_len % CHARS_PER_BYTE != 0) {
+		iccom_err("string"
+			" must contain %d-multiple number of hex digits"
+			" + 0-terminator only. String provided (in -- quotes):"
+			" --%s--"
+			, CHARS_PER_BYTE, str);
+		return -EINVAL;
+	}
+	if (out_size < str_len / CHARS_PER_BYTE) {
+		iccom_err("receiver array"
+			" is smaller (%zu) than needed (%zu)."
+			, out_size, str_len / CHARS_PER_BYTE);
+		return -EINVAL;
+	}
 
-        *data_transport_to_iccom_size = 
-                                (buffer_size/CHARACTERS_PER_BYTE);
+        char tmp[CHARS_PER_BYTE + 1];
+	tmp[CHARS_PER_BYTE] = 0;
 
-        for(int i = 0, j = 0; j < *data_transport_to_iccom_size; 
-                                                i += CHARACTERS_PER_BYTE, j++) {
-                /* Copy four bytes and finish with '\0' */
-                memcpy(data, &buffer[i], CHARACTERS_PER_BYTE);
-                data[CHARACTERS_PER_BYTE] = '\0';
+	int w_idx = 0;
+        for (int i = 0; i <= str_len - CHARS_PER_BYTE; i += CHARS_PER_BYTE) {
+                memcpy(tmp, str + i, CHARS_PER_BYTE);
 
-                ret = kstrtouint(data, 16, &auxiliarData);
+        	unsigned int res;
+                int val = kstrtouint(tmp, 16, &res);
 
-                if(ret != 0) {
-                        iccom_warning("These chars do not make an integer!");
-                        goto invalid_params;
+                if (val != 0) {
+			iccom_err("failed at part: %s", tmp);
+			return val;
                 }
-                data_transport_to_iccom[j] = auxiliarData;
+		if (res > 0xFF) {
+			iccom_err("failed, part overflow: %s", tmp);
+			return val;
+		}
+		*(bytearray__out + w_idx++) = (uint8_t)val;
         }
 
-        return true;
+	#undef CHARS_PER_BYTE
 
-invalid_params:
-        iccom_warning("decode_transport_to_iccom_data is nok!");
-        return false;
+        return w_idx;
 }
 
 // Encode the iccom data sent to transport by
@@ -5866,7 +5900,7 @@ void encode_iccom_to_transport_data(
         for(int i = 0; i < data_iccom_to_transport_size; i++)
         {
                 *buffer_size += sprintf(buffer + *buffer_size, 
-                                        "0x%02x", data_iccom_to_transport[i]);
+                                        "%02x", data_iccom_to_transport[i]);
         }
 }
 
@@ -5916,18 +5950,20 @@ static DEVICE_ATTR_RO(R);
 // @dev {valid ptr} Transport device
 // @attr {valid ptr} device attribute properties
 // @buf {valid ptr} buffer with the data from user space
-// @count {number} size of buffer from user space
+// @count {number} the @buf string length not-including the  0-terminator
+// 	which is automatically appended by sysfs subsystem
 //
 // RETURNS:
 //      count: all data processed
 static ssize_t W_store(
                 struct device *dev, struct device_attribute *attr,
-                const char *buf, size_t count) {
-        struct xfer_device_data *xfer_dev_data = NULL;
+                const char *data, size_t count)
+{
+	const size_t total_count = count;
+	char buf[count + 1];
+	memcpy(buf, data, count + 1);
+
         struct dummy_transport_data * transport_dev_data  = NULL;
-        char data_transport_to_iccom[ICCOM_DATA_XFER_SIZE_BYTES];
-        size_t data_transport_to_iccom_size = 0;
-        bool decoding_state;
 
         transport_dev_data = (struct dummy_transport_data *)dev_get_drvdata(dev);
 
@@ -5935,28 +5971,41 @@ static ssize_t W_store(
                 goto invalid_params;
         }
 
-        xfer_dev_data = transport_dev_data->xfer_dev_data;
+        struct xfer_device_data *xfer_dev = transport_dev_data->xfer_dev_data;
 
-        if(IS_ERR_OR_NULL(xfer_dev_data)) {
+        if(IS_ERR_OR_NULL(xfer_dev)) {
                 goto invalid_params;
         }
 
-        decoding_state = decode_transport_to_iccom_data(buf, count, 
-                                                        data_transport_to_iccom,
-                                                        &data_transport_to_iccom_size);
+	if (count >= PAGE_SIZE) {
+	    iccom_warning("Sysfs data can not fit the 0-terminator.");
+	    return -EINVAL;
+	}
+	// NOTE: count is a lenth without the last 0-terminator char
+	if (buf[count] != 0) {
+	    iccom_warning("NON-null-terminated string is provided by sysfs.");
+	    return -EINVAL;
+	}
+	// trim the end a bit
+	while (count > 0 && ((buf[count - 1] == '\n') || (buf[count - 1] == ' ')
+			|| (buf[count - 1] == '\t') || (buf[count - 1] == 0))) {
+		buf[count-- - 1] = 0;
+	}
+	
+        char wire_data[ICCOM_DATA_XFER_SIZE_BYTES];
+        ssize_t xfer_size = iccom_parse_hex_str(buf, count, 
+						wire_data, sizeof(wire_data));
 
-        if(decoding_state == false) {
-                goto decoding_failed;
+        if (xfer_size < 0) {
+		iccom_warning("transport Device Decoding failed for str: %s"
+			      , buf);
+		return -EINVAL;
         }
 
-        write_transport_data_to_buffer(
-                xfer_dev_data, data_transport_to_iccom, data_transport_to_iccom_size);
-        iccom_transport_exchange_data(xfer_dev_data);
-        return count;
+        write_transport_data_to_buffer(xfer_dev, wire_data, xfer_size);
+        iccom_transport_exchange_data(xfer_dev);
+        return total_count;
 
-decoding_failed:
-        iccom_warning("Transport Device Decoding failed!");
-        return -EINVAL;
 invalid_params:
         iccom_warning("Transport Device Write data to iccom device failed!");
         return -EFAULT;
