@@ -8,6 +8,13 @@ FROM bosch-linux-full-duplex-interface:latest AS iccom
 ARG kernel_source_dir_x86=/repos/linux_x86/
 ARG kernel_source_dir_arm=/repos/linux_arm/
 
+RUN cd /repos/linux && ./scripts/config --set-val CONFIG_NET y
+RUN cd /repos/linux && make -j16
+ARG QEMU_KERNEL_IMAGE_PATH="/builds/linux/linuz.bzImage"
+RUN ls -la /builds/linux/
+RUN cp /repos/linux/arch/x86/boot/bzImage    \
+          ${QEMU_KERNEL_IMAGE_PATH}
+
 ENV repo_path=/repos/linux-iccom
 RUN rm -rf ${repo_path} && mkdir -p ${repo_path}
 
@@ -55,12 +62,15 @@ RUN make -C ${kernel_source_dir_x86} M=${repo_path} \
         CONFIG_BOSCH_ICCOM=m \
         CONFIG_CHECK_SIGNATURE=n \
         CONFIG_ICCOM_VERSION=$(git rev-parse HEAD) \
-        CONFIG_BOSCH_FD_TEST_TRANSPORT=m
+        CONFIG_BOSCH_FD_TEST_TRANSPORT=m \
+        CONFIG_BOSCH_ICCOM_SOCKETS=m
 
 RUN mkdir -p ${INITRAMFS_CHROOT_X86}/modules              \
     && cp ${repo_path}/src/fd_test_transport.ko         \
         ${INITRAMFS_CHROOT_X86}/modules/      \
     && cp ${repo_path}/src/iccom.ko         \
+    ${INITRAMFS_CHROOT_X86}/modules/ \
+    && cp ${repo_path}/src/iccom_socket_if.ko         \
     ${INITRAMFS_CHROOT_X86}/modules/
 
 # ARM
@@ -68,12 +78,15 @@ RUN make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -C ${kernel_source_dir_arm} M
         CONFIG_BOSCH_ICCOM=m \
         CONFIG_CHECK_SIGNATURE=n \
         CONFIG_ICCOM_VERSION=$(git rev-parse HEAD) \
-        CONFIG_BOSCH_FD_TEST_TRANSPORT=m
+        CONFIG_BOSCH_FD_TEST_TRANSPORT=m \
+        CONFIG_BOSCH_ICCOM_SOCKETS=m
 
 RUN mkdir -p ${INITRAMFS_CHROOT_ARM}/modules              \
     && cp ${repo_path}/src/fd_test_transport.ko         \
         ${INITRAMFS_CHROOT_ARM}/modules/      \
     && cp ${repo_path}/src/iccom.ko         \
+    ${INITRAMFS_CHROOT_ARM}/modules/ \
+    && cp ${repo_path}/src/iccom_socket_if.ko         \
     ${INITRAMFS_CHROOT_ARM}/modules/
 
 # NOTE: Run the qemu tests with the main

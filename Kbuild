@@ -1,5 +1,6 @@
 ccflags-y := -std=gnu99 -Wno-declaration-after-statement
 ccflags-y += -I$(src)/include
+ccflags-y += -DDEFAULT_SYMBOL_NAMESPACE=
 
 ccflags-$(CONFIG_BOSCH_ICCOM_DEBUG) += -DICCOM_DEBUG
 ifeq ($(CONFIG_BOSCH_ICCOM_DEBUG), y)
@@ -30,7 +31,7 @@ ifeq ($(CONFIG_BOSCH_ICCOM_TEST_MODULE), y)
     obj-m += src/iccom_test.o
 endif
 
-obj-$(CONFIG_BOSCH_ICCOM_SOCKETS) += iccom_socket_if.o
+obj-$(CONFIG_BOSCH_ICCOM_SOCKETS) += src/iccom_socket_if.o
 
 # Custom protocol aggregator drivers
 obj-$(CONFIG_BOSCH_ICCOM_EXAMPLE) += iccom-example.o
