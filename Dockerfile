@@ -35,6 +35,7 @@ RUN run-qemu-tests
 
 # Check the expected results
 RUN <<EOF
+        grep "iccom_test_0.python: PASS" /qemu_run.log && \
         grep "iccom_test_1.python: PASS" /qemu_run.log && \
         grep "iccom_test_2.python: PASS" /qemu_run.log && \
         grep "iccom_test_3.python: PASS" /qemu_run.log && \

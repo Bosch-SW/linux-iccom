@@ -153,10 +153,9 @@ bool iccom_is_running(struct iccom_dev *iccom);
 
 // Describes the transport device data
 //
-// @tx_xfer contains the data transmitted from transport
-//      to iccom
-// @rx_xfer contains the data received in transport 
-//      from iccom
+// @xfer the xfer to execute data
+// @got_us_data true if for the given @xfer User Space has provided the
+//      wire data already (this guy is being reset every new xfer).
 // @next_xfer_id contains the next xfer id 
 //      to be transmitted
 // @running contains the status whether transport
@@ -164,8 +163,9 @@ bool iccom_is_running(struct iccom_dev *iccom);
 // @finishing contains the status whether transport
 //      is finishing its work
 struct xfer_device_data {
-        struct full_duplex_xfer tx_xfer;
-        struct full_duplex_xfer rx_xfer;
+        struct full_duplex_xfer xfer;
+        bool got_us_data;
+
         int next_xfer_id;
         bool running;
         bool finishing;

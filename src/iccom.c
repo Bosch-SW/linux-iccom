@@ -72,7 +72,10 @@ struct ida dummy_transport_device_id;
 // 4: + optional info messages (info level 1)
 // 5: + all info messages (debug information) (info level 2)
 //    NOTE: automatically enables debug mode at 5 level of
-//    verbosity
+//    	verbosity
+//    NOTE: the xfers and packge dumps will be printed at the
+//    	KERNEL_INFO level, so if your kernel is more silient
+//    	than this, you will not see the xfer nor packages hex dumps
 #define ICCOM_VERBOSITY 3
 
 // The minimal time which must pass between repeated error is reported
@@ -576,6 +579,9 @@ struct iccom_package {
 // Packet header descriptor.
 // See SALT documentation, 20 November 2018, 1.4.4 Payload data
 //     organization, blocks: Table 11, Table 13.
+//
+// NOTE: the @complete field is the most significant bit (MSB)
+// 	of the cid-complete byte.
 typedef struct {
 	uint16_t payload: 16;
 	uint8_t lun: 8;
@@ -1254,7 +1260,7 @@ static void iccom_dbg_printout_package(struct iccom_package *pkg)
 	iccom_info_raw(ICCOM_LOG_INFO_DBG_LEVEL
 		       , "ptr: %px\tdata ptr: %px\tdata size: %zu"
 		       , pkg, pkg->data, pkg->size);
-	print_hex_dump(KERN_DEBUG, ICCOM_LOG_PREFIX"PKG data: ", 0, 16
+	print_hex_dump(KERN_INFO, ICCOM_LOG_PREFIX"PKG data: ", 0, 16
 		       , 1, pkg->data, pkg->size, true);
 	iccom_info_raw(ICCOM_LOG_INFO_DBG_LEVEL, "= Decoded info: =");
 	iccom_info_raw(ICCOM_LOG_INFO_DBG_LEVEL
@@ -1311,7 +1317,7 @@ void iccom_dbg_printout_xfer(const struct full_duplex_xfer *const xfer)
 		printk("Xfer TX data ptr: BROKEN: %px\n", xfer->data_tx);
 	} else if (xfer->data_tx) {
 		printk("Xfer TX data ptr: %px\n", xfer->data_tx);
-		print_hex_dump(KERN_DEBUG, "TX data: ", 0, 16
+		print_hex_dump(KERN_INFO, "TX data: ", 0, 16
 			    , 1, xfer->data_tx, xfer->size_bytes, true);
 	} else {
 		printk("Xfer TX data ptr: NULL\n");
@@ -1320,7 +1326,7 @@ void iccom_dbg_printout_xfer(const struct full_duplex_xfer *const xfer)
 		printk("Xfer RX data ptr: BROKEN: %px\n", xfer->data_rx_buf);
 	} else if (xfer->data_rx_buf) {
 		printk("Xfer RX data ptr: %px\n", xfer->data_rx_buf);
-		print_hex_dump(KERN_DEBUG, "RX data: ", 0, 16
+		print_hex_dump(KERN_INFO, "RX data: ", 0, 16
 			    , 1, xfer->data_rx_buf, xfer->size_bytes
 			    , true);
 	} else {
@@ -1334,8 +1340,8 @@ void iccom_dbg_printout_message(const struct iccom_message *const msg)
 {
 	iccom_info_raw(ICCOM_LOG_INFO_DBG_LEVEL, "-- message --");
 	iccom_info_raw(ICCOM_LOG_INFO_DBG_LEVEL
-		       , "ch: %u\tid: %u\tpriority: %u\tlen: %u"
-			 "\tuncommitted len: %u\t state: %s"
+		       , "ch: %u\tid: %u\tpriority: %u\tlen: %lu"
+			 "\tuncommitted len: %lu\t state: %s"
 		       , msg->channel
 		       , msg->id, msg->priority, msg->length
 		       , msg->uncommitted_length
@@ -1347,7 +1353,7 @@ void iccom_dbg_printout_message(const struct iccom_message *const msg)
 	} else if (!msg->data) {
 		iccom_info_raw(ICCOM_LOG_INFO_DBG_LEVEL, "data: NULL");
 	} else {
-		print_hex_dump(KERN_DEBUG, "data: ", 0, 16
+		print_hex_dump(KERN_INFO, "data: ", 0, 16
 			       , 1, msg->data, msg->length, true);
 	}
 }
@@ -1448,10 +1454,10 @@ inline static size_t iccom_packet_write_header(
 			= __cpu_to_be16((uint16_t)payload_size_bytes);
 	((iccom_package_header*)target)->lun
 			= iccom_packet_channel_lun(channel);
-	((iccom_package_header*)target)->complete
-			= message_complete ? 1 : 0;
 	((iccom_package_header*)target)->cid
 			= iccom_packet_channel_sid(channel);
+	((iccom_package_header*)target)->complete
+			= message_complete ? 1 : 0;
 
 	return ICCOM_PACKET_HEADER_SIZE_BYTES;
 }
@@ -1821,7 +1827,7 @@ void __add_sysfs_channel_msg_to_channel(
         list_add(&channel_msg_entry->list, &channel_entry->sysfs_channel_msgs_head);
 }
 
-// Routine to store a channel message 
+// Routine to store a channel message
 // to be later on provided to userspace
 //
 // @iccom_dev_p {valid prt} iccom_dev pointer
@@ -1832,11 +1838,11 @@ void __store_sysfs_channel_msg(
                 struct iccom_dev *iccom_dev_p, unsigned int channel_id,
                 char * input_data, size_t data_size) {
         struct sysfs_channel *channel_entry, *tmp = NULL;
-        
+
         if(input_data == NULL || data_size <= 0) {
                 return;
         }
-        
+
         list_for_each_entry_safe(channel_entry, tmp,
                                 &iccom_dev_p->sysfs_channels_head, list) {
                 if(channel_entry->channel_id == channel_id) {
@@ -4746,7 +4752,7 @@ void __destroy_sysfs_channel_msgs_list_entry(
 void __destroy_sysfs_channel_msgs_list(struct sysfs_channel *channel_entry) {
         struct sysfs_channel_msg *channel_msg_entry, *tmp;
         if(channel_entry != NULL) {
-                list_for_each_entry_safe(channel_msg_entry, tmp, 
+                list_for_each_entry_safe(channel_msg_entry, tmp,
                                 &channel_entry->sysfs_channel_msgs_head, list) {
                         __destroy_sysfs_channel_msgs_list_entry(channel_msg_entry);
                 }
@@ -4802,7 +4808,7 @@ void __get_and_clear_next_channel_msg_entry(
         }
 }
 
-// Routine to retrieve a channel message 
+// Routine to retrieve a channel message
 // and provide it to userspace
 //
 // @iccom_dev_p {valid prt} iccom_dev pointer
@@ -4829,7 +4835,8 @@ void __get_sysfs_channel_msg(
 // @iccom_dev_p {valid prt} iccom_dev pointer
 // @channel_id {number} iccom device channel id
 void __create_sysfs_channel(
-                struct iccom_dev *iccom_dev_p, unsigned int channel_id) {
+                struct iccom_dev *iccom_dev_p, unsigned int channel_id)
+{
         struct sysfs_channel * iccom_channel_entry = NULL;
 
         if(__is_sysfs_channel_present(iccom_dev_p, channel_id) == true) {
@@ -4844,6 +4851,8 @@ void __create_sysfs_channel(
                 __initialize_sysfs_channel_msgs_list(iccom_channel_entry);
                 list_add(&iccom_channel_entry->list, &iccom_dev_p->sysfs_channels_head);
         }
+	iccom_info(ICCOM_LOG_INFO_DBG_LEVEL,
+		   "sniffer created for ch: %d", channel_id);
 }
 
 // Destroy a sysfs channel for a ICCom device
@@ -4856,6 +4865,9 @@ void __destroy_sysfs_channel(
         list_for_each_entry_safe(channel_entry, tmp, &iccom_dev_p->sysfs_channels_head, list) {
                 if(channel_entry->channel_id == channel_id) {
                         __destroy_sysfs_channels_list_entry(channel_entry);
+			iccom_info(ICCOM_LOG_INFO_DBG_LEVEL
+					, "sniffer destroyed for ch: %d"
+					, channel_id);
                         return;
                 }
         }
@@ -4971,7 +4983,7 @@ static ssize_t transport_store(
                 struct device *dev, struct device_attribute *attr,
                 const char *buf, size_t count)
 {
-        struct iccom_dev *iccom_dev_data = 
+        struct iccom_dev *iccom_dev_data =
                                 (struct iccom_dev *)dev_get_drvdata(dev);
         struct dummy_transport_data * dummyDeviceData = NULL;
         struct device *dummy_transport_device = NULL;
@@ -4993,7 +5005,7 @@ static ssize_t transport_store(
         memcpy(device_name, buf, count);
         device_name[count] = '\0';
 
-        dummy_transport_device = 
+        dummy_transport_device =
                 bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
         if(IS_ERR_OR_NULL(dummy_transport_device)) {
@@ -5069,7 +5081,7 @@ static ssize_t statistics_show(
                 goto invalid_params;
         }
 
-        const struct iccom_dev_statistics * const stats = 
+        const struct iccom_dev_statistics * const stats =
                                                 &iccom_dev_data->p->statistics;
 
         size_t len = (size_t)snprintf(buf, BUFFER_SIZE
@@ -5207,7 +5219,7 @@ static ssize_t channel_store(
         }
 
         simulationData = (char *) kmalloc(count, GFP_KERNEL);
-        
+
         if(IS_ERR_OR_NULL(simulationData)) {
                 goto invalid_params;
         }
@@ -5254,7 +5266,7 @@ static ssize_t channels_ctl_store(
         static char name[3];
         struct iccom_dev *iccom_dev_data = NULL;
         struct kernfs_node* knode = NULL;
-        
+
         if(2 != sscanf(buf,"%c %d", &opt, &ch_num)) {
                 goto invalid_params;
         }
@@ -5281,7 +5293,7 @@ static ssize_t channels_ctl_store(
                         iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
                                 "Channel no. %d, result %d",ch_num,ret);
                 }
-                
+
         }
         else if(opt == 'd') {
                 knode = sysfs_get_dirent(iccom_dev_data->channels_root->sd,name);
@@ -5382,7 +5394,7 @@ static int iccom_probe(struct platform_device *pdev) {
         __initialize_sysfs_channels_list(iccom_dev_data);
 
         // Create channels directory
-        iccom_dev_data->channels_root = 
+        iccom_dev_data->channels_root =
                 kobject_create_and_add(SYSFS_CHANNEL_ROOT, &(pdev->dev.kobj));
 
         return 0;
@@ -5499,30 +5511,43 @@ void xfer_free(struct full_duplex_xfer *xfer) {
 //      0: ok
 //      -EINVAL: xfer is null pointer
 //      -ENOMEM: no memory to allocate
-int write_transport_data_to_buffer(
+int iccom_sysfs_test_update_wire_data(
                 struct xfer_device_data *xfer_dev,
                 char data_transport_to_iccom[],
                 size_t data_transport_to_iccom_size)
 {
-        if (IS_ERR_OR_NULL(&xfer_dev->tx_xfer)) {
+        if (IS_ERR_OR_NULL(&xfer_dev->xfer)) {
                 return -EINVAL;
         }
 
-        if (!IS_ERR_OR_NULL(xfer_dev->tx_xfer.data_rx_buf)) {
-                kfree(xfer_dev->tx_xfer.data_rx_buf);
+        if (!IS_ERR_OR_NULL(xfer_dev->xfer.data_rx_buf)) {
+                kfree(xfer_dev->xfer.data_rx_buf);
         }
 
-        if (!IS_ERR_OR_NULL(data_transport_to_iccom) && 
+        if (!IS_ERR_OR_NULL(data_transport_to_iccom) &&
                 data_transport_to_iccom_size) {
-                xfer_dev->tx_xfer.size_bytes = data_transport_to_iccom_size;
-                xfer_dev->tx_xfer.data_rx_buf = 
-                        kmalloc(xfer_dev->tx_xfer.size_bytes, GFP_KERNEL);
-                if (!xfer_dev->tx_xfer.data_rx_buf) {
+                xfer_dev->xfer.size_bytes = data_transport_to_iccom_size;
+                xfer_dev->xfer.data_rx_buf =
+                        kmalloc(xfer_dev->xfer.size_bytes, GFP_KERNEL);
+                if (!xfer_dev->xfer.data_rx_buf) {
                         return -ENOMEM;
                 }
-                memcpy(xfer_dev->tx_xfer.data_rx_buf, data_transport_to_iccom,
-                        xfer_dev->tx_xfer.size_bytes);
+                memcpy(xfer_dev->xfer.data_rx_buf, data_transport_to_iccom,
+                        xfer_dev->xfer.size_bytes);
         }
+
+	// NOTE: the actual xfer will happen on-read (wire data show)
+	// 	to keep the US in sync. The total workflow goes:
+	// 	* US writes to wire
+	// 		* this data gets saved in current xfer
+	// 		* transport dev remembers that the wire data is provided
+	// 	* US reads from wire
+	// 		* transport dev gets read request
+	// 		* if no write was provided before - reject to read. Else:
+	// 		* the current xfer wire data is provided to US
+	// 		* transport dev confirms xfer_done(...) to ICCom
+	// 		* ICCom updates the current xfer with new data
+	xfer_dev->got_us_data = true;
 
         return 0;
 }
@@ -5603,25 +5628,16 @@ int accept_data(
                 struct xfer_device_data* xfer_dev,
                 struct __kernel full_duplex_xfer *xfer)
 {
-        /* Copy xfer to tx_xfer as is. In later
-           stage override the data_rx_buf in write_transport_data_to_buffer
-        */
-        int res = deep_xfer_copy(xfer, &xfer_dev->tx_xfer);
+        // Copy xfer to dev xfer as is. In later
+        // stage override the data_rx_buf in iccom_sysfs_test_update_wire_data
+        int res = deep_xfer_copy(xfer, &xfer_dev->xfer);
         if (res < 0) {
                 return res;
         }
 
-        /* Copy xfer to rx_xfer as is for sysfs
-           buffer check
-        */
-        res = deep_xfer_copy(xfer, &xfer_dev->rx_xfer);
-        if (res < 0) {
-                return res;
-        }
+        xfer_dev->xfer.id = iterate_to_next_xfer_id(xfer_dev);
 
-        xfer_dev->tx_xfer.id = iterate_to_next_xfer_id(xfer_dev);
-
-        return xfer_dev->tx_xfer.id;
+        return xfer_dev->xfer.id;
 }
 
 // Function to trigger an exchange of data between
@@ -5629,26 +5645,28 @@ int accept_data(
 //
 // @xfer_dev {valid ptr} xfer device
 __maybe_unused
-static void iccom_transport_exchange_data(struct xfer_device_data *xfer_dev) {
-        if (!xfer_dev->tx_xfer.done_callback) {
+static void iccom_transport_exchange_data(struct xfer_device_data *xfer_dev)
+{
+        if (IS_ERR_OR_NULL(xfer_dev->xfer.done_callback)) {
                 return;
         }
 
         bool start_immediately = false;
         struct full_duplex_xfer *next_xfer
-                        = xfer_dev->tx_xfer.done_callback(
-                                &xfer_dev->tx_xfer,
+                        = xfer_dev->xfer.done_callback(
+                                &xfer_dev->xfer,
                                 xfer_dev->next_xfer_id,
                                 &start_immediately,
-                                xfer_dev->tx_xfer.consumer_data);
+                                xfer_dev->xfer.consumer_data);
 
-        if (IS_ERR(next_xfer)) {
-                return;
+	// for a new xfer US must provide a new data, so dropping the flag
+	xfer_dev->got_us_data = false;
+
+        if (IS_ERR_OR_NULL(next_xfer)) {
+		return;
         }
 
-        if (next_xfer && accept_data(xfer_dev, next_xfer) < 0) {
-                return;
-        }
+        accept_data(xfer_dev, next_xfer);
 }
 
 /*------------------- FULL DUPLEX INTERFACE API ----------------------------*/
@@ -5741,11 +5759,11 @@ __maybe_unused
 int init(void __kernel *device, struct full_duplex_xfer *default_xfer) {
         DUMMY_TRANSPORT_DEV_TO_XFER_DEV_DATA;
         DUMMY_TRANSPORT_CHECK_DEVICE(device, return -ENODEV);
-        xfer_init(&xfer_dev_data->tx_xfer);
-        xfer_init(&xfer_dev_data->rx_xfer);
+        xfer_init(&xfer_dev_data->xfer);
         xfer_dev_data->next_xfer_id = 1;
         xfer_dev_data->finishing = false;
         xfer_dev_data->running = true;
+	xfer_dev_data->got_us_data = false;
         return accept_data(xfer_dev_data, default_xfer);
 }
 
@@ -5767,8 +5785,7 @@ int close(void __kernel *device) {
         DUMMY_TRANSPORT_CHECK_DEVICE(device, return -ENODEV);
         xfer_dev_data->finishing = true;
         xfer_dev_data->running = false;
-        xfer_free(&xfer_dev_data->tx_xfer);
-        xfer_free(&xfer_dev_data->rx_xfer);
+        xfer_free(&xfer_dev_data->xfer);
         return 0;
 }
 
@@ -5799,7 +5816,7 @@ int reset(void __kernel *device, struct full_duplex_xfer *default_xfer) {
 // Example:
 // 		11030AFFDDCD\0
 // each 2-digit number will be converted to the byte value,
-// and the result will be written to the 
+// and the result will be written to the
 //
 // NOTE: if parsing failed somewhere in the middle, then result is still
 // 	an error (so either all is fine or all failed, not inbetween)
@@ -5816,7 +5833,7 @@ int reset(void __kernel *device, struct full_duplex_xfer *default_xfer) {
 //
 // RETURNS:
 //      >=0: the size of the data written to @bytearray__out
-//      <0: negated error code 
+//      <0: negated error code
 ssize_t iccom_parse_hex_str(const char *str, const size_t str_len
 		, uint8_t *bytearray__out, size_t out_size)
 {
@@ -5836,7 +5853,7 @@ ssize_t iccom_parse_hex_str(const char *str, const size_t str_len
 	if (str[str_len] != 0) {
 		iccom_err("string does not terminate with 0.");
 		return -EINVAL;
-	} 
+	}
 	if (IS_ERR_OR_NULL(bytearray__out)) {
 		iccom_err("bad output array ptr.");
 		return -EINVAL;
@@ -5863,14 +5880,14 @@ ssize_t iccom_parse_hex_str(const char *str, const size_t str_len
         for (int i = 0; i <= str_len - CHARS_PER_BYTE; i += CHARS_PER_BYTE) {
                 memcpy(tmp, str + i, CHARS_PER_BYTE);
 
-        	unsigned int res;
-                int val = kstrtouint(tmp, 16, &res);
+        	unsigned int val;
+                int res = kstrtouint(tmp, 16, &val);
 
-                if (val != 0) {
+                if (res != 0) {
 			iccom_err("failed at part: %s", tmp);
 			return val;
                 }
-		if (res > 0xFF) {
+		if (val > 0xFF) {
 			iccom_err("failed, part overflow: %s", tmp);
 			return val;
 		}
@@ -5891,7 +5908,7 @@ ssize_t iccom_parse_hex_str(const char *str, const size_t str_len
 // @data_iccom_to_transport {array} array holding the data to be copied
 // @data_iccom_to_transport_size {number} size of array
 void encode_iccom_to_transport_data(
-                char *buffer, size_t *buffer_size,
+                char *buffer, ssize_t *buffer_size,
                 const uint8_t data_iccom_to_transport[],
                 const size_t data_iccom_to_transport_size)
 {
@@ -5899,7 +5916,7 @@ void encode_iccom_to_transport_data(
 
         for(int i = 0; i < data_iccom_to_transport_size; i++)
         {
-                *buffer_size += sprintf(buffer + *buffer_size, 
+                *buffer_size += sprintf(buffer + *buffer_size,
                                         "%02x", data_iccom_to_transport[i]);
         }
 }
@@ -5915,31 +5932,40 @@ void encode_iccom_to_transport_data(
 //      0: length of data is zero - no data
 //      > 0: data size of data to be showed in user space
 static ssize_t R_show(
-                struct device *dev, struct device_attribute *attr, char *buf) {
-        size_t buffer_size = 0;
-        struct xfer_device_data *xfer_dev_data = NULL;
-        struct dummy_transport_data * transport_dev_data = NULL;
-
-        transport_dev_data = (struct dummy_transport_data *)dev_get_drvdata(dev);
-
-        if(IS_ERR_OR_NULL(transport_dev_data)) {
-                goto invalid_params;
+                struct device *dev, struct device_attribute *attr, char *buf)
+{
+        if(IS_ERR_OR_NULL(dev)) {
+	    	iccom_err("the wire transport kernel dev not provided");
+		return -EINVAL;
         }
-
-        xfer_dev_data = transport_dev_data->xfer_dev_data;
-
-        if(IS_ERR_OR_NULL(xfer_dev_data)) {
-                goto invalid_params;
+        struct dummy_transport_data * transport_dev
+        	= (struct dummy_transport_data *)dev_get_drvdata(dev);
+        if(IS_ERR_OR_NULL(transport_dev)) {
+	    	iccom_err("the wire transport dev broken ptr");
+		return -EINVAL;
         }
+        struct xfer_device_data *xfer_dev = transport_dev->xfer_dev_data;
+        if(IS_ERR_OR_NULL(xfer_dev)) {
+	    	iccom_err("the xfer dev broken ptr");
+		return -EINVAL;
+        }
+	if (!xfer_dev->got_us_data) {
+	    	iccom_err("to read something you need to write something first =)");
+		return -EPROTO;
+	}
 
+        ssize_t buffer_size = 0;
+	// TODO: @Luis
+	// 	* The range check must be here
+	// 	* The buffer size via return value is way simpler
         encode_iccom_to_transport_data(
-                buf, &buffer_size, (uint8_t*)xfer_dev_data->rx_xfer.data_tx,
-                xfer_dev_data->rx_xfer.size_bytes);
+                buf, &buffer_size, (uint8_t*)xfer_dev->xfer.data_tx,
+                xfer_dev->xfer.size_bytes);
+
+	// Do the actual xfer here, cause
+        iccom_transport_exchange_data(xfer_dev);
 
         return buffer_size;
-
-invalid_params:
-        return sprintf(buf, "Reading iccom device data sent to transport failed!");
 }
 
 static DEVICE_ATTR_RO(R);
@@ -5993,8 +6019,13 @@ static ssize_t W_store(
 	}
 	
         char wire_data[ICCOM_DATA_XFER_SIZE_BYTES];
-        ssize_t xfer_size = iccom_parse_hex_str(buf, count, 
+        ssize_t xfer_size = iccom_parse_hex_str(buf, count,
 						wire_data, sizeof(wire_data));
+
+	#ifdef ICCOM_DEBUG
+	print_hex_dump(KERN_INFO, ICCOM_LOG_PREFIX"Sim RX data: ", 0, 16
+		       , 1, wire_data, xfer_size, true);
+	#endif
 
         if (xfer_size < 0) {
 		iccom_warning("transport Device Decoding failed for str: %s"
@@ -6002,8 +6033,7 @@ static ssize_t W_store(
 		return -EINVAL;
         }
 
-        write_transport_data_to_buffer(xfer_dev, wire_data, xfer_size);
-        iccom_transport_exchange_data(xfer_dev);
+        iccom_sysfs_test_update_wire_data(xfer_dev, wire_data, xfer_size);
         return total_count;
 
 invalid_params:
@@ -6092,7 +6122,7 @@ static struct attribute *dummy_transport_dev_attrs[] = {
 
 ATTRIBUTE_GROUPS(dummy_transport_dev);
 
-// Transport create device (store) class attribute for 
+// Transport create device (store) class attribute for
 // dummy transport devices
 //
 // @class {valid ptr} transport class
@@ -6184,7 +6214,7 @@ static int dummy_transport_probe(struct platform_device *pdev) {
         iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
                 "Probing a Dummy Transport Device with id: %d", pdev->id);
 
-        transport_dev_data = (struct dummy_transport_data *) 
+        transport_dev_data = (struct dummy_transport_data *)
                 kmalloc(sizeof(struct dummy_transport_data), GFP_KERNEL);
 
         if(IS_ERR_OR_NULL(transport_dev_data)) {
@@ -6200,7 +6230,7 @@ static int dummy_transport_probe(struct platform_device *pdev) {
                 goto no_memory;
         }
 
-        transport_dev_data->xfer_dev_data = (struct xfer_device_data *) 
+        transport_dev_data->xfer_dev_data = (struct xfer_device_data *)
                         kmalloc(sizeof(struct xfer_device_data), GFP_KERNEL);
 
         if(IS_ERR_OR_NULL(transport_dev_data->xfer_dev_data)) {
