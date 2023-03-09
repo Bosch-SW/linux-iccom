@@ -596,18 +596,18 @@ static void __iccom_socket_unreg_socket_family(
 //      >= 0: number of bytes actually provided to user space, on success
 //      < 0: negated error code, on failure
 static ssize_t read_loopback_rule_show(struct device *dev, 
-					struct device_attribute *attr,
-                        		char *buf)
+                                        struct device_attribute *attr,
+                                        char *buf)
 {
         ICCOM_SK_CHECK_PTR(buf, return -EINVAL);
 
         struct iccom_sockets_device *iccom_sk
                 = (struct iccom_sockets_device *)dev_get_drvdata(dev);
 
-	if(IS_ERR_OR_NULL(iccom_sk)) {
-		iccom_socket_err("Invalid parameters.");
-		return -EINVAL;
-	}
+        if(IS_ERR_OR_NULL(iccom_sk)) {
+                iccom_socket_err("Invalid parameters.");
+                return -EINVAL;
+        }
 
 	const int BUFFER_SIZE = 256;
 
@@ -719,19 +719,19 @@ int  __iccom_sk_parse_lback_string(char *const buf
 //      >= 0: number of bytes actually were written, on success
 //      < 0: negated error code, on failure
 static ssize_t set_loopback_rule_store(struct device *dev, 
-					struct device_attribute *attr,
-					const char *buf, size_t count)
+                                        struct device_attribute *attr,
+                                        const char *buf, size_t count)
 {
         ICCOM_SK_CHECK_PTR(buf, return -EINVAL);
 
         struct iccom_sockets_device *iccom_sk
                 = (struct iccom_sockets_device *)dev_get_drvdata(dev);
-	int ret = 0;
+        int ret = 0;
 
         if(IS_ERR_OR_NULL(iccom_sk)) {
-		iccom_socket_err("Invalid parameters.");
-		return -EINVAL;
-	}
+                iccom_socket_err("Invalid parameters.");
+                return -EINVAL;
+        }
 
 	const unsigned int BUFFER_SIZE = 64;
 
@@ -743,14 +743,14 @@ static ssize_t set_loopback_rule_store(struct device *dev,
                 return -EFAULT;
         }
 
-	char *buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
+        char *buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
 
         if (IS_ERR_OR_NULL(buffer)) {
                 iccom_socket_err("failed to create new rule buffer:"
                                  " no memory");
                 return -ENOMEM;
         }
-	memcpy(buffer, buf, count);
+        memcpy(buffer, buf, count);
 
         struct iccom_sk_loopback_mapping_rule parsing_res;
         ret = __iccom_sk_parse_lback_string(buffer, count, &parsing_res);
@@ -990,7 +990,7 @@ static int iccom_skif_stop(struct iccom_sockets_device *iccom_sk)
 //      0: length of data is zero - no data
 //      > 0: data size of data to be showed in user space
 static ssize_t version_show(struct class *class, struct class_attribute *attr,
-			    char *buf) 
+                            char *buf) 
 {
 	ICCOM_SK_CHECK_SYSFS_CLASS_PARAMS("", return -EINVAL);
 
@@ -1112,7 +1112,7 @@ static struct class iccom_socket_if_class = {
 // return:
 //      bytes - message with status
 static ssize_t iccom_dev_show(struct device *dev, struct device_attribute *attr,
-			      char *buf) 
+                              char *buf) 
 {
 	ICCOM_SK_CHECK_SYSFS_DEVICE_PARAMS("", return -EINVAL);
 
