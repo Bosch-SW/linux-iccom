@@ -57,10 +57,6 @@
 
 /* --------------------- BUILD CONFIGURATION ----------------------------*/
 
-// ID Allocator
-struct ida iccom_device_id;
-struct ida dummy_transport_device_id;
-
 // package layout info, see @iccom_package description
 // (all sizes in bytes)
 
@@ -292,8 +288,8 @@ struct ida dummy_transport_device_id;
 #define ICCOM_BUFFER_SIZE ICCOM_ACK_XFER_SIZE_BYTES
 #endif
 
-#define SYSFS_CHANNEL_ROOT "channels"
-#define SYSFS_CHANNEL_PERMISSIONS 0644
+#define ICCOM_TEST_SYSFS_CHANNEL_ROOT "channels"
+#define ICCOM_TEST_SYSFS_CHANNEL_PERMISSIONS 0644
 
 /* --------------------- DATA PACKAGE CONFIGURATION ---------------------*/
 
@@ -407,37 +403,37 @@ struct ida dummy_transport_device_id;
 #define iccom_info_raw(level, fmt, ...)					\
 	iccom_info_raw_helper__(level, fmt, ##__VA_ARGS__)
 
-#define DUMMY_TRANSPORT_CHECK_DEVICE(device, error_action)               \
-        if (IS_ERR_OR_NULL(device)) {                                    \
-                iccom_err("%s: no device;\n", __func__);                 \
-                error_action;                                            \
-        }
+#define ICCOM_TEST_TRANSPORT_CHECK_DEVICE(device, error_action)		\
+	if (IS_ERR_OR_NULL(device)) {					\
+		iccom_err("%s: no device;\n", __func__);		\
+		error_action;						\
+	}
+#define ICCOM_TEST_TRANSPORT_DEV_TO_XFER_DEV_DATA				\
+	struct iccom_test_transport_dev * iccom_test_transport =		\
+		(struct iccom_test_transport_dev *)dev_get_drvdata(device);	\
+	struct xfer_device_data *xfer_dev_data =				\
+		iccom_test_transport->xfer_dev_data;
 
-#define DUMMY_TRANSPORT_DEV_TO_XFER_DEV_DATA                                \
-        struct dummy_transport_data * transport_dev_data =                  \
-                (struct dummy_transport_data *)dev_get_drvdata(device);     \
-        struct xfer_device_data *xfer_dev_data =                            \
-                transport_dev_data->xfer_dev_data;
-
-#define DUMMY_TRANSPORT_XFER_DEV_ON_FINISH(error_action)                   \
-        if (xfer_dev_data->finishing) {                                    \
-                error_action;                                              \
-        }
+#define ICCOM_TEST_TRANSPORT_XFER_DEV_ON_FINISH(error_action)		\
+	if (xfer_dev_data->finishing) {					\
+		error_action;						\
+	}
 #define ICCOM_CHECK_DEVICE(msg, error_action)				\
 	if (IS_ERR_OR_NULL(iccom)) {					\
 		iccom_err("%s: no device; "msg"\n", __func__);		\
 		error_action;						\
 	}
-#define ICCOM_CHECK_IFACE(msg, error_action)                             \
-        if (IS_ERR_OR_NULL(&iccom->xfer_iface)) {                        \
-                iccom_err("%s: no xfer iface; "msg"\n", __func__);       \
-                error_action;                                            \
-        }
-#define TRANSPORT_CHECK_DEVICE(msg, error_action)                        \
-        if (IS_ERR_OR_NULL(iccom->xfer_device)) {                        \
-                iccom_err("%s: no transport device; "msg"\n", __func__); \
-                error_action;                                            \
-        }
+#define ICCOM_CHECK_IFACE(msg, error_action)				\
+	if (IS_ERR_OR_NULL(&iccom->xfer_iface)) {			\
+		iccom_err("%s: no xfer iface; "msg"\n", __func__);	\
+		error_action;						\
+	}
+#define TRANSPORT_CHECK_DEVICE(msg, error_action)			\
+	if (IS_ERR_OR_NULL(iccom->xfer_device)) {			\
+		iccom_err("%s: no transport device; "msg"\n",		\
+				__func__); 				\
+		error_action;						\
+	}
 #define ICCOM_CHECK_DEVICE_PRIVATE(msg, error_action)			\
 	if (IS_ERR_OR_NULL(iccom->p)) {					\
 		iccom_err("%s: no private part of device; "msg"\n"	\
@@ -490,6 +486,68 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 			, void *consumer_data);
 
 /* --------------------------- MAIN STRUCTURES --------------------------*/
+
+// This structure is needed for the iccom test transport to hold
+// the duplex iface and the xfer device so that it can communicate
+// with iccom to exchange data. It describes the test transport private data
+//
+// @full_duplex_sym_iface {ptr valid} full duplex interface
+// @xfer_device_data {ptr valid} iccom test transport device
+struct iccom_test_transport_dev
+{
+	struct full_duplex_sym_iface * duplex_iface;
+	struct xfer_device_data *xfer_dev_data; 
+};
+
+// Describes the sysfs channels which shall hold
+// all messages received from iccom to the upper
+// layer for a specific sysfs channel. The user
+// space can retrieve all the channel messages
+// one by one
+//
+// @ch_id {number} ICCom logical channel ID
+// @number_of_msgs {number} number of messages 
+// that a particular channel has to be read from
+// userspace
+// @sysfs_ch_msgs_head channels messages list head
+// @list list_head for pointing to next channel
+struct iccom_test_sysfs_channel {
+	unsigned int ch_id;
+	unsigned int number_of_msgs;
+	struct list_head sysfs_ch_msgs_head;
+	struct list_head list;
+};
+
+// Describes the sysfs channels messages
+// received from iccom to upper layer which
+// will be read by user space later in time
+//
+// @data {ptr valid} contains the message received from iccom
+// @size {number} number of characters in the message
+// @list list_head for pointing to next previous message
+struct iccom_test_sysfs_channel_msg {
+	struct iccom_message *msg;
+	struct list_head list;
+};
+
+// Describes the transport device data
+//
+// @xfer the xfer to execute data
+// @got_us_data true if for the given @xfer User Space has provided the
+//      wire data already (this guy is being reset every new xfer).
+// @next_xfer_id contains the next xfer id 
+//      to be transmitted
+// @running contains the status whether transport
+//      is running or not
+// @finishing contains the status whether transport
+//      is finishing its work
+struct xfer_device_data {
+	struct full_duplex_xfer xfer;
+	bool got_us_data;
+	int next_xfer_id;
+	bool running;
+	bool finishing;
+};
 
 // TODO: probably not needed
 // (probably needed only for xfer)
@@ -570,7 +628,7 @@ struct iccom_message {
 struct iccom_package {
 	struct list_head list_anchor;
 
-	char *data;
+	uint8_t *data;
 	size_t size;
 
 	bool owns_data;
@@ -683,7 +741,7 @@ struct iccom_message_storage
 	struct list_head channels_list;
 	struct mutex lock;
 
-	struct iccom_dev* parent_iccom_dev;
+	struct iccom_dev *iccom;
 
 	iccom_msg_ready_callback_ptr_t message_ready_global_callback;
 	void *global_consumer_data;
@@ -879,6 +937,11 @@ static const char ICCOM_ERROR_S_NOMEM[] = "no memory available";
 static const char ICCOM_ERROR_S_TRANSPORT[]
 	= "Xfer failed on transport layer. Restarting frame.";
 
+// Serves to allocate unique ids for an iccom platform device
+struct ida iccom_dev_id;
+// Serves to allocate unique ids for an iccom test transport platform device
+struct ida iccom_test_transport_dev_id;
+
 /* ------------------------ FORWARD DECLARATIONS ------------------------*/
 
 #ifdef ICCOM_DEBUG
@@ -1014,7 +1077,7 @@ static inline size_t __iccom_package_get_payload_free_space(
 static inline void __iccom_package_set_id(
 		struct iccom_package *package, int id)
 {
-	*((uint8_t*)package->data
+	*(package->data
 		+ ICCOM_PACKAGE_PAYLOAD_DATA_LENGTH_FIELD_SIZE_BYTES)
 			= (uint8_t)id;
 }
@@ -1023,7 +1086,7 @@ static inline void __iccom_package_set_id(
 static inline int __iccom_package_get_id(
 		struct iccom_package *package)
 {
-	return (int)(*((uint8_t*)package->data
+	return (int)(*(package->data
 			+ ICCOM_PACKAGE_PAYLOAD_DATA_LENGTH_FIELD_SIZE_BYTES));
 }
 
@@ -1032,7 +1095,7 @@ static inline void __iccom_package_set_src(
 		struct iccom_package *package, unsigned int src)
 {
 	int src_offset = package->size - ICCOM_PACKAGE_CRC_FIELD_SIZE_BYTES;
-	*((uint32_t *)((uint8_t *)package->data + src_offset)) = (uint32_t)src;
+	*((uint32_t *)(package->data + src_offset)) = (uint32_t)src;
 }
 
 // Helper. Gets the package SRC. See @iccom_package description.
@@ -1040,7 +1103,7 @@ static inline unsigned int __iccom_package_get_src(
 		struct iccom_package *package)
 {
 	int src_offset = package->size - ICCOM_PACKAGE_CRC_FIELD_SIZE_BYTES;
-	return *((uint32_t *)((uint8_t *)package->data + src_offset));
+	return *((uint32_t *)(package->data + src_offset));
 }
 
 // Helper. Returns the address of the beginning of the package payload
@@ -1055,7 +1118,7 @@ static inline void * __iccom_package_get_free_space_start_addr(
 	if (!free_length) {
 		return NULL;
 	}
-	return ((uint8_t *)package->data + package->size
+	return (package->data + package->size
 			    - ICCOM_PACKAGE_CRC_FIELD_SIZE_BYTES)
 	       - free_length;
 }
@@ -1195,7 +1258,7 @@ static int __iccom_package_init(struct iccom_package *package
 {
 	package->size = package_size_bytes;
 	package->owns_data = true;
-	package->data = kmalloc(package->size, GFP_KERNEL);
+	package->data = (uint8_t*)kmalloc(package->size, GFP_KERNEL);
 	if (!package->data) {
 		iccom_err("no memory");
 		package->size = 0;
@@ -1793,69 +1856,122 @@ static void __iccom_msg_storage_free_channel(
 	return;
 }
 
-// Add a sysfs_channel_msg to the channel msgs list
-// in a specific channel
+
+// Deep copies an iccom message and validates
+// whether the deep copy was sucessful
 //
-// @channel_entry {valid prt} channel where the message
-// shall be stored
-// @input_data {ptr valid} data to be copy
-// @data_size {number} dize of bytes to copy
-void __add_sysfs_channel_msg_to_channel(
-                struct sysfs_channel *channel_entry,
-                char * input_data, size_t data_size) {
-        struct sysfs_channel_msg * channel_msg_entry = NULL;
+// @src {valid prt} iccom message to be copied
+// @dest {valid prt} iccom message to copy to
+//
+// RETURNS:
+//      0: ok
+//     <0: errors
+ssize_t iccom_test_sysfs_ch_msg_deep_copy(struct iccom_message *src, struct iccom_message *dst) {
+	if (IS_ERR_OR_NULL(src) || IS_ERR_OR_NULL(dst)) {
+		return -EINVAL;
+	}
 
-        if(channel_entry == NULL) {
-                return;
-        }
+	dst->data = (char *) kzalloc(src->length, GFP_KERNEL);
 
-        channel_msg_entry = (struct sysfs_channel_msg *)
-                        kzalloc(sizeof(struct sysfs_channel_msg), GFP_KERNEL);
-        if(channel_msg_entry == NULL) {
-                return;
-        }
+	if (IS_ERR_OR_NULL(dst->data)) {
+		return -ENOMEM;
+	}
 
-        channel_msg_entry->data = (char *) kmalloc(data_size, GFP_KERNEL);
-        if(!channel_msg_entry->data) {
-                kfree(channel_msg_entry);
-                return;
-        }
+	memcpy(dst->data, src->data, src->length);
+	dst->list_anchor = src->list_anchor;
+	dst->length = src->length;
+	dst->channel = src->channel;
+	dst->id = src->id;
+	dst->priority = src->priority;
+	dst->finalized = src->finalized;
+	dst->uncommitted_length = src->uncommitted_length;
 
-        channel_entry->number_of_msgs++;
-        memcpy(channel_msg_entry->data, input_data, data_size);
-        channel_msg_entry->size = data_size;
-        list_add(&channel_msg_entry->list, &channel_entry->sysfs_channel_msgs_head);
+	return 0;
 }
 
-// Routine to store a channel message
-// to be later on provided to userspace
+// Free all the memory associated with the iccom message
 //
-// @iccom_dev_p {valid prt} iccom_dev pointer
-// @channel_id {number} iccom device channel id
-// @input_data {valid prt} data to be copied
-// @data_size {number} size of data to be copied
-void __store_sysfs_channel_msg(
-                struct iccom_dev *iccom_dev_p, unsigned int channel_id,
-                char * input_data, size_t data_size) {
-        struct sysfs_channel *channel_entry, *tmp = NULL;
+// @msg {valid prt} iccom message to be freed
 
-        if(input_data == NULL || data_size <= 0) {
-                return;
-        }
 
-        list_for_each_entry_safe(channel_entry, tmp,
-                                &iccom_dev_p->sysfs_channels_head, list) {
-                if(channel_entry->channel_id == channel_id) {
-                        if(channel_entry->number_of_msgs >= MAX_CHANNEL_MSG_ALLOWED) {
-                                iccom_err("Discarding message as channel %d with size %ld message %s",
-                                                 channel_id, data_size, input_data);
-                                return;
-                        }
-                        __add_sysfs_channel_msg_to_channel(channel_entry,
-                                                         input_data, data_size);
-                        return;
-                }
-        }
+void iccom_test_sysfs_ch_msg_free(struct iccom_message *msg) {
+	if (IS_ERR_OR_NULL(msg)) {
+		return;
+	}
+
+	if (!IS_ERR_OR_NULL(msg->data)) {
+		kfree(msg->data);
+	}
+	kfree(msg);
+}
+
+// Routine to store an iccom message for
+// a particular sysfs channel to later on
+// be fetched by the userspace.
+//
+// @iccom {valid prt} iccom_dev pointer
+// @ch_id {number} ICCom logical channel ID
+// @msg {valid prt} iccom message contaning
+// the message received to the upper layer 
+//
+// RETURNS:
+//      0: ok
+//     <0: errors
+ssize_t iccom_test_sysfs_ch_enqueue_msg(
+		struct iccom_dev *iccom, unsigned int ch_id,
+		struct iccom_message *msg)
+{
+	struct iccom_test_sysfs_channel *ch_entry, *tmp = NULL;
+	struct iccom_test_sysfs_channel_msg * ch_msg_entry = NULL;
+	
+	if (IS_ERR_OR_NULL(msg)) {
+		iccom_err("Sysfs iccom message is null");
+		return -EFAULT;
+	}
+	if (IS_ERR_OR_NULL(msg->data)) {
+		iccom_err("Sysfs iccom message data is null");
+		return -EFAULT;
+	}
+	if (msg->length == 0) {
+		iccom_err("Sysfs iccom message data size is 0");
+		return -EINVAL;
+	}
+	
+	list_for_each_entry_safe(ch_entry, tmp,
+				&iccom->sysfs_test_ch_head , list) {
+		if (ch_entry->ch_id != ch_id) {
+			continue;
+		}
+		if (ch_entry->number_of_msgs >= ICCOM_SYSFS_MAX_MSG_ALLOWED_PER_CHANNEL) {
+			iccom_err("Discarding message in channel %d", ch_id);
+			return -ENOBUFS;
+		}
+
+		ch_msg_entry = (struct iccom_test_sysfs_channel_msg *)
+				kzalloc(sizeof(struct iccom_test_sysfs_channel_msg), GFP_KERNEL);
+		if (IS_ERR_OR_NULL(ch_msg_entry)) {
+			return -ENOMEM;
+		}
+
+		ch_msg_entry->msg = (struct iccom_message *)
+					kmalloc(sizeof(struct iccom_message), GFP_KERNEL);
+		if (IS_ERR_OR_NULL(ch_msg_entry->msg)) {
+			kfree(ch_msg_entry);
+			return -ENOMEM;
+		}
+
+		ch_entry->number_of_msgs++;
+		ssize_t res = iccom_test_sysfs_ch_msg_deep_copy(msg, ch_msg_entry->msg);
+		if (res != 0) {
+			iccom_test_sysfs_ch_msg_free(ch_msg_entry->msg);
+			kfree(ch_msg_entry);
+			return res;
+		}
+
+		list_add(&ch_msg_entry->list, &ch_entry->sysfs_ch_msgs_head);
+		return 0;
+	}
+	return -EINVAL;
 }
 
 // ICCom callback to signal a full message received from
@@ -1865,40 +1981,40 @@ void __store_sysfs_channel_msg(
 // @msg_data {valid ptr} message data
 // @msg_len {number} message length
 // @consumer_data {valid ptr} consumer pointer holding where the information
-//                            shall be sent to
-//
-// RETURNS:
-//      0: length of data is zero - no data
-//      > 0: data size of data to be showed in user space
-static bool sysfs_iccom_msg_received_callback(
-                struct iccom_dev* iccom_device, unsigned int channel,
-                char *msg_data, size_t msg_len)
+// shall be sent to
+static void iccom_test_sysfs_ch_callback(
+		struct iccom_dev *iccom, unsigned int channel,
+		struct iccom_message *msg)
 {
-        iccom_warning("Received from iccom for channel %d message '%s' size %zu"
-		      , channel, msg_data, msg_len);
-        __store_sysfs_channel_msg(iccom_device, channel, msg_data, msg_len);
-        return true;
+	iccom_warning("Received from iccom for channel %d message '%s' size %zu"
+		, channel, msg->data, msg->length);
+
+	if(iccom_test_sysfs_ch_enqueue_msg(iccom, channel, msg) != 0) {
+		iccom_err("Failed to store iccom message for channel %d",
+			channel);
+	}
 }
 
 // Checks whether sysfs channel is already
 // created
 //
-// @iccom_dev_p {valid prt} iccom_dev pointer
-// @channel_id {number} iccom device channel id
+// @iccom {valid prt} iccom_dev pointer
+// @ch_id {number} ICCom logical channel ID
 //
 // RETURNS:
 //      true: channel already exists
 //      false: channel does not exists
-bool __is_sysfs_channel_present(
-                struct iccom_dev *iccom_dev_p, unsigned int channel_id) {
-        struct sysfs_channel *channel_entry, *tmp;
-        list_for_each_entry_safe(channel_entry, tmp,
-                        &iccom_dev_p->sysfs_channels_head, list) {
-                if(channel_entry->channel_id == channel_id) {
-                        return true;
-                }
-        }
-        return false;
+bool iccom_test_sysfs_is_ch_present(
+		struct iccom_dev *iccom, unsigned int ch_id)
+{
+	struct iccom_test_sysfs_channel *ch_entry, *tmp;
+	list_for_each_entry_safe(ch_entry, tmp,
+			&iccom->sysfs_test_ch_head , list) {
+		if (ch_entry->ch_id == ch_id) {
+			return true;
+		}
+	}
+	return false;
 }
 
 // Notifies the channel consumer about all ready messages
@@ -1937,8 +2053,8 @@ static int __iccom_msg_storage_pass_channel_to_consumer(
 
 	mutex_lock(&storage->lock);
 
-        bool sysfs_channel_present = __is_sysfs_channel_present(
-                                        storage->parent_iccom_dev, channel_rec->channel);
+	bool iccom_test_sysfs_channel_present = iccom_test_sysfs_is_ch_present(
+					storage->iccom, channel_rec->channel);
 
 	if (!IS_ERR_OR_NULL(channel_rec->message_ready_callback)) {
 		msg_ready_callback = channel_rec->message_ready_callback;
@@ -1946,7 +2062,7 @@ static int __iccom_msg_storage_pass_channel_to_consumer(
 	} else if (!IS_ERR_OR_NULL(storage->message_ready_global_callback)) {
 		msg_ready_callback = storage->message_ready_global_callback;
 		callback_consumer_data = storage->global_consumer_data;
-	} else if(sysfs_channel_present == false){
+	} else if (iccom_test_sysfs_channel_present == false) {
 		mutex_unlock(&storage->lock);
 		return 0;
 	}
@@ -1971,17 +2087,16 @@ static int __iccom_msg_storage_pass_channel_to_consumer(
 		count++;
 		bool ownership_to_consumer = false;
 
-		if(!IS_ERR_OR_NULL(msg_ready_callback) && !IS_ERR_OR_NULL(callback_consumer_data)) {
+		if (iccom_test_sysfs_channel_present == true) {
+			iccom_test_sysfs_ch_callback(
+				storage->iccom, channel_rec->channel, msg);
+		}
+
+		if (!IS_ERR_OR_NULL(msg_ready_callback) && !IS_ERR_OR_NULL(callback_consumer_data)) {
 			ownership_to_consumer = msg_ready_callback(
 							channel_rec->channel
 							, msg->data, msg->length
 							, callback_consumer_data);
-		}
-
-		if(sysfs_channel_present == true) {
-			sysfs_iccom_msg_received_callback(
-				storage->parent_iccom_dev, channel_rec->channel,
-				(char*)msg->data, msg->length);
 		}
 
 		if (ownership_to_consumer) {
@@ -2643,7 +2758,6 @@ void iccom_msg_storage_clear(struct iccom_message_storage *storage)
 	mutex_unlock(&storage->lock);
 	storage->message_ready_global_callback = NULL;
 	storage->global_consumer_data = NULL;
-	storage->parent_iccom_dev = NULL;
 }
 
 // Cleans and frees whole storage (the struct itself it not freed).
@@ -2652,6 +2766,7 @@ void iccom_msg_storage_clear(struct iccom_message_storage *storage)
 __maybe_unused
 void iccom_msg_storage_free(struct iccom_message_storage *storage)
 {
+	storage->iccom = NULL;
 	iccom_msg_storage_clear(storage);
 	mutex_destroy(&storage->lock);
 }
@@ -2793,7 +2908,7 @@ static int iccom_msg_storage_set_channel_callback(
 	struct iccom_message_storage_channel *channel_rec
 		= __iccom_msg_storage_find_channel(storage, channel);
 	if (!channel_rec) {
-		if (message_ready_callback == NULL) {
+		if (IS_ERR_OR_NULL(message_ready_callback)) {
 			goto finalize;
 		}
 		channel_rec = __iccom_msg_storage_add_channel(storage
@@ -2954,7 +3069,7 @@ static int iccom_msg_storage_init(
 	storage->uncommitted_finalized_count = 0;
 	storage->message_ready_global_callback = NULL;
 	storage->global_consumer_data = NULL;
-	storage->parent_iccom_dev = container_of(storage
+	storage->iccom = container_of(storage
 				, struct iccom_dev_private, rx_messages)->iccom;
 	return 0;
 }
@@ -3421,7 +3536,7 @@ static inline void __iccom_fillup_ack_xfer(
 static inline bool __iccom_verify_ack(struct iccom_package *package)
 {
 	return (package->size == ICCOM_ACK_XFER_SIZE_BYTES)
-		&& ((uint8_t)package->data[0] == ICCOM_PACKAGE_ACK_VALUE);
+		&& (package->data[0] == ICCOM_PACKAGE_ACK_VALUE);
 }
 
 // Helper. Moves TX package queue one step forward.
@@ -4716,161 +4831,173 @@ EXPORT_SYMBOL(iccom_is_running);
 
 // Initializes the sysfs channels list
 //
-// @iccom_dev_p {valid prt} iccom_dev pointer
-void __initialize_sysfs_channels_list(struct iccom_dev *iccom_dev_p) {
-        INIT_LIST_HEAD(&iccom_dev_p->sysfs_channels_head);
+// @iccom {valid prt} iccom_dev pointer
+void __iccom_test_sysfs_initialize_ch_list(struct iccom_dev *iccom)
+{
+	INIT_LIST_HEAD(&iccom->sysfs_test_ch_head );
 }
 
 // Initializes the sysfs channel msgs list
 //
-// @channel_entry {valid prt} sysfs channel entry
-void __initialize_sysfs_channel_msgs_list(
-                struct sysfs_channel * channel_entry) {
-        INIT_LIST_HEAD(&channel_entry->sysfs_channel_msgs_head);
+// @ch_entry {valid prt} sysfs channel entry
+void __iccom_test_sysfs_init_ch_msgs_list(
+		struct iccom_test_sysfs_channel * ch_entry)
+{
+	INIT_LIST_HEAD(&ch_entry->sysfs_ch_msgs_head);
 }
 
-// Destroy a list element (sysfs_channel_msg) from a
+// Destroys an iccom message stored in a specific
+// sysfs channel
+//
+// @ch_msg_entry {valid prt} sysfs channel msg entry
+void __iccom_test_sysfs_ch_msg_del_entry(
+		struct iccom_test_sysfs_channel_msg *ch_msg_entry)
+{
+	if (IS_ERR_OR_NULL(ch_msg_entry)) {
+		return;
+	}
+	if (!IS_ERR_OR_NULL(ch_msg_entry->msg)) {
+		iccom_test_sysfs_ch_msg_free(ch_msg_entry->msg);
+	}
+	list_del(&ch_msg_entry->list);
+}
+
+// Destroy a sysfs channel and all its containing
+// iccom messages stored for the sysfs channel
+//
+// @ch_entry {valid prt} sysfs channel entry
+void __iccom_test_sysfs_ch_del_entry(struct iccom_test_sysfs_channel *ch_entry)
+{
+	struct iccom_test_sysfs_channel_msg *ch_msg_entry, *tmp;
+
+	if (IS_ERR_OR_NULL(ch_entry)) {
+		return;
+	}
+	ch_entry->ch_id = -1;
+	ch_entry->number_of_msgs = 0;
+
+	/* Destroy all msgs from a sysfs channel*/
+	list_for_each_entry_safe(ch_msg_entry, tmp,
+			&ch_entry->sysfs_ch_msgs_head, list) {
+		__iccom_test_sysfs_ch_msg_del_entry(ch_msg_entry);
+	}
+	
+	list_del(&ch_entry->list);
+}
+
+// Destroy all list elements (iccom_test_sysfs_channel) from a
 // specific channel
 //
-// @channel_msg_entry {valid prt} sysfs channel msg entry
-void __destroy_sysfs_channel_msgs_list_entry(
-                struct sysfs_channel_msg *channel_msg_entry) {
-        if(channel_msg_entry != NULL) {
-                if(channel_msg_entry->data != NULL) {
-                        kfree(channel_msg_entry->data);
-                        channel_msg_entry->data = NULL;
-                }
-                channel_msg_entry->size = 0;
-                list_del(&channel_msg_entry->list);
-        }
+// @iccom {valid prt} iccom_dev pointer for device
+void __iccom_test_sysfs_ch_del(struct iccom_dev *iccom)
+{
+	struct iccom_test_sysfs_channel *ch_entry, *tmp;
+	list_for_each_entry_safe(ch_entry, tmp,
+				&iccom->sysfs_test_ch_head , list) {
+		__iccom_test_sysfs_ch_del_entry(ch_entry);
+	}
 }
 
-// Destroy all list elements (sysfs_channel_msg) from a
-// specific channel
-//
-// @channel_entry {valid prt} sysfs channel entry
-void __destroy_sysfs_channel_msgs_list(struct sysfs_channel *channel_entry) {
-        struct sysfs_channel_msg *channel_msg_entry, *tmp;
-        if(channel_entry != NULL) {
-                list_for_each_entry_safe(channel_msg_entry, tmp,
-                                &channel_entry->sysfs_channel_msgs_head, list) {
-                        __destroy_sysfs_channel_msgs_list_entry(channel_msg_entry);
-                }
-        }
-}
-
-// Destroy a list element (sysfs_channel) from a
-// iccom device
-//
-// @channel_entry {valid prt} sysfs channel entry
-void __destroy_sysfs_channels_list_entry(struct sysfs_channel *channel_entry) {
-        if(channel_entry != NULL) {
-                channel_entry->channel_id = -1;
-                channel_entry->number_of_msgs = 0;
-                __destroy_sysfs_channel_msgs_list(channel_entry);
-                list_del(&channel_entry->list);
-        }
-}
-
-// Destroy all list elements (sysfs_channel) from a
-// specific channel
-//
-// @iccom_dev_p {valid prt} iccom_dev pointer for device
-void __destroy_sysfs_channels_list(struct iccom_dev *iccom_dev_p) {
-        struct sysfs_channel *channel_entry, *tmp;
-        list_for_each_entry_safe(channel_entry, tmp,
-                                &iccom_dev_p->sysfs_channels_head, list) {
-                __destroy_sysfs_channels_list_entry(channel_entry);
-        }
-}
-
-// Routine for extracting a sysfs_channel_msg
+// Routine for extracting a iccom_test_sysfs_channel_msg
 // from a specific channel and remove it from
 // the list for userspace
 //
-// @channel_entry {valid prt} channel where the message
+// @ch_entry {valid prt} channel where the message
 // is stored
 // @output_data {ptr valid} pointer where data shall be written to
 // @data_size {valid prt} size of the output data that was written
-void __get_and_clear_next_channel_msg_entry(
-                struct sysfs_channel *channel_entry, char * output_data,
-                size_t *data_size){
-  struct sysfs_channel_msg *channel_msg_entry, *tmp;
-        list_for_each_entry_safe_reverse(channel_msg_entry, tmp,
-                                &channel_entry->sysfs_channel_msgs_head, list) {
-                if(channel_msg_entry->data != NULL) {
-                        channel_entry->number_of_msgs--;
-                        memcpy(output_data, channel_msg_entry->data, channel_msg_entry->size);
-                        *data_size = channel_msg_entry->size;
-                        __destroy_sysfs_channel_msgs_list_entry(channel_msg_entry);
-                        return;
-                }
-        }
+void __iccom_test_sysfs_ch_pop_msg(
+		struct iccom_test_sysfs_channel *ch_entry, char * output_data,
+		size_t *data_size)
+{
+	struct iccom_test_sysfs_channel_msg *ch_msg_entry, *tmp;
+	list_for_each_entry_safe_reverse(ch_msg_entry, tmp,
+				&ch_entry->sysfs_ch_msgs_head, list) {
+		memcpy(output_data, ch_msg_entry->msg->data, ch_msg_entry->msg->length);
+		*data_size = ch_msg_entry->msg->length;
+		ch_entry->number_of_msgs--;
+		__iccom_test_sysfs_ch_msg_del_entry(ch_msg_entry);
+		return;
+	}
 }
 
 // Routine to retrieve a channel message
 // and provide it to userspace
 //
-// @iccom_dev_p {valid prt} iccom_dev pointer
-// @channel_id {number} iccom device channel id
+// @iccom {valid prt} iccom_dev pointer
+// @ch_id {number} ICCom logical channel ID
 // @output_data {valid prt} where the data shall be copied to
 // @data_size {valid prt} size of data copied
-void __get_sysfs_channel_msg(
-                struct iccom_dev *iccom_dev_p, unsigned int channel_id,
-                char * output_data, size_t *data_size) {
-        struct sysfs_channel *cursor, *tmp;
-        *data_size = 0;
+void __iccom_test_sysfs_ch_pop_msg_by_ch_id(
+		struct iccom_dev *iccom, unsigned int ch_id,
+		char * output_data, size_t *data_size)
+{
+	struct iccom_test_sysfs_channel *cursor, *tmp;
+	*data_size = 0;
 
-        list_for_each_entry_safe(cursor, tmp,
-                                &iccom_dev_p->sysfs_channels_head, list) {
-                if(cursor->channel_id == channel_id) {
-                        __get_and_clear_next_channel_msg_entry(cursor, output_data, data_size);
-                        return;
-                }
-        }
+	list_for_each_entry_safe(cursor, tmp,
+				&iccom->sysfs_test_ch_head , list) {
+		if (cursor->ch_id == ch_id) {
+			__iccom_test_sysfs_ch_pop_msg(cursor, output_data, data_size);
+			return;
+		}
+	}
 }
 
 // Create a sysfs channel for a ICCom device
 //
-// @iccom_dev_p {valid prt} iccom_dev pointer
-// @channel_id {number} iccom device channel id
-void __create_sysfs_channel(
-                struct iccom_dev *iccom_dev_p, unsigned int channel_id)
+// @iccom {valid prt} iccom_dev pointer
+// @ch_id {number} ICCom logical channel ID
+//
+// RETURNS:
+//      0: ok
+//     <0: errors
+ssize_t iccom_test_sysfs_ch_add_by_iccom(
+		struct iccom_dev *iccom, unsigned int ch_id)
 {
-        struct sysfs_channel * iccom_channel_entry = NULL;
+	struct iccom_test_sysfs_channel * iccom_ch_entry = NULL;
 
-        if(__is_sysfs_channel_present(iccom_dev_p, channel_id) == true) {
-                return;
-        }
+	if (iccom_test_sysfs_is_ch_present(iccom, ch_id) == true) {
+		return -EINVAL;
+	}
 
-        iccom_channel_entry = kzalloc(sizeof(struct sysfs_channel),GFP_KERNEL);
+	iccom_ch_entry = kzalloc(sizeof(struct iccom_test_sysfs_channel),GFP_KERNEL);
 
-        if(iccom_channel_entry != NULL) {
-                iccom_channel_entry->channel_id = channel_id;
-                iccom_channel_entry->number_of_msgs = 0;
-                __initialize_sysfs_channel_msgs_list(iccom_channel_entry);
-                list_add(&iccom_channel_entry->list, &iccom_dev_p->sysfs_channels_head);
-        }
-	iccom_info(ICCOM_LOG_INFO_DBG_LEVEL,
-		   "sniffer created for ch: %d", channel_id);
+	if (IS_ERR_OR_NULL(iccom_ch_entry)) {
+		iccom_err("No memory to allocate sysfs channel entry.");
+		return -ENOMEM;
+	}
+
+	iccom_ch_entry->ch_id = ch_id;
+	iccom_ch_entry->number_of_msgs = 0;
+	__iccom_test_sysfs_init_ch_msgs_list(iccom_ch_entry);
+	list_add(&iccom_ch_entry->list, &iccom->sysfs_test_ch_head );
+	
+	return 0;
 }
 
 // Destroy a sysfs channel for a ICCom device
 //
-// @iccom_dev_p {valid prt} iccom_dev pointer
-// @channel_id {number} iccom device channel id
-void __destroy_sysfs_channel(
-                struct iccom_dev *iccom_dev_p, unsigned int channel_id) {
-        struct sysfs_channel *channel_entry, *tmp;
-        list_for_each_entry_safe(channel_entry, tmp, &iccom_dev_p->sysfs_channels_head, list) {
-                if(channel_entry->channel_id == channel_id) {
-                        __destroy_sysfs_channels_list_entry(channel_entry);
+// @iccom {valid prt} iccom_dev pointer
+// @ch_id {number} ICCom logical channel ID
+//
+//RETURNS
+// 0: channel exists and deleted
+// -EINVAL: channel does not exist
+ssize_t iccom_test_sysfs_ch_del_by_iccom(
+		struct iccom_dev *iccom, unsigned int ch_id)
+{
+	struct iccom_test_sysfs_channel *ch_entry, *tmp;
+	list_for_each_entry_safe(ch_entry, tmp, &iccom->sysfs_test_ch_head , list) {
+		if (ch_entry->ch_id == ch_id) {
+			__iccom_test_sysfs_ch_del_entry(ch_entry);
 			iccom_info(ICCOM_LOG_INFO_DBG_LEVEL
-					, "sniffer destroyed for ch: %d"
-					, channel_id);
-                        return;
-                }
-        }
+				, "sniffer destroyed for ch: %d"
+				, ch_id);
+			return 0;
+		}
+	}
+	return -EINVAL;
 }
 
 // ICCom version (show) class attribute used to know the git revision
@@ -4881,12 +5008,12 @@ void __destroy_sysfs_channel(
 // @buf {valid ptr} buffer to write output to user space
 //
 // RETURNS:
-//      0: length of data is zero - no data
-//      > 0: data size of data to be showed in user space
+//      0: no data to be displayed
+//      > 0: size of data to be showed in user space
 static ssize_t version_show(
-                struct class *class, struct class_attribute *attr, char *buf)
+		struct class *class, struct class_attribute *attr, char *buf)
 {
-        return sprintf(buf,"version: 2820bb7e0e3668815ce6e0a7cf019ec3664eaf10");
+	return scnprintf(buf, PAGE_SIZE, "%s", ICCOM_VERSION);
 }
 
 static CLASS_ATTR_RO(version);
@@ -4899,41 +5026,41 @@ static CLASS_ATTR_RO(version);
 // @count {number} size of buffer from user space
 //
 // RETURNS:
-//      count: all data processed
-static ssize_t create_device_store(
-                struct class *class, struct class_attribute *attr,
-                const char *buf, size_t count)
+//  count: ok
+//    < 0: errors
+static ssize_t create_iccom_store(
+		struct class *class, struct class_attribute *attr,
+		const char *buf, size_t count)
 {
-        struct platform_device * new_pdev;
+	// Allocate one unused ID
+	int device_id = ida_alloc(&iccom_dev_id, GFP_KERNEL);
 
-        // Allocate one unused ID
-        int device_id = ida_alloc(&iccom_device_id, GFP_KERNEL);
+	if (device_id < 0) {
+		iccom_err("Could not allocate a new unused ID");
+		return -EINVAL;
+	}
 
-        if(device_id < 0) {
-                iccom_err("Could not allocate a new unused ID");
-                return -EINVAL;
-        }
+	struct platform_device * new_pdev = 
+		platform_device_register_simple("iccom",device_id,NULL,0);
 
-        new_pdev = platform_device_register_simple("iccom",device_id,NULL,0);
+	if (IS_ERR_OR_NULL(new_pdev)) {
+		iccom_err("Could not register the device iccom.%d",device_id);
+		return -EFAULT;
+	}
 
-        if(IS_ERR_OR_NULL(new_pdev)) {
-                iccom_err("Could not register the device iccom.%d",device_id);
-                return -EFAULT;
-        }
-
-        return count;
+	return count;
 }
 
-static CLASS_ATTR_WO(create_device);
+static CLASS_ATTR_WO(create_iccom);
 
 // List of all ICCom class attributes
 //
 // @class_attr_version the version of ICCom file
 // @class_attr_create_device the create device file of ICCom
 static struct attribute *iccom_class_attrs[] = {
-        &class_attr_version.attr,
-        &class_attr_create_device.attr,
-        NULL
+	&class_attr_version.attr,
+	&class_attr_create_iccom.attr,
+	NULL
 };
 
 ATTRIBUTE_GROUPS(iccom_class);
@@ -4946,26 +5073,26 @@ ATTRIBUTE_GROUPS(iccom_class);
 // @buf {valid ptr} buffer to write output to user space
 //
 // RETURNS:
-//      0: length of data is zero - no data
-//      > 0: data size of data to be showed in user space
+//      0: no data to be displayed
+//      > 0: size of data to be showed in user space
 static ssize_t transport_show(
-                struct device *dev, struct device_attribute *attr, char *buf)
+		struct device *dev, struct device_attribute *attr, char *buf)
 {
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
 
-        struct iccom_dev *iccom_dev_data = (struct iccom_dev *)dev_get_drvdata(dev);
+	if (IS_ERR_OR_NULL(iccom)) {
+		iccom_err("Iccom device data is null.");
+		return scnprintf(buf, PAGE_SIZE,
+			"%s", "No transport device associated yet - iccom device data is null");
+	}
 
-        if(IS_ERR_OR_NULL(iccom_dev_data)) {
-                goto no_transport;
-        }
+	if (IS_ERR_OR_NULL(iccom->xfer_device)) {
+		iccom_err("Iccom device data xfer_device is null.");
+		return scnprintf(buf, PAGE_SIZE, 
+			"%s", "No transport device associated yet - iccxfer device is null");
+	}
 
-        if(IS_ERR_OR_NULL(iccom_dev_data->xfer_device)) {
-                goto no_transport;
-        }
-
-        return sprintf(buf, "Transport device associated");
-
-no_transport:
-        return sprintf(buf, "No transport device associated yet.");
+	return scnprintf(buf, PAGE_SIZE, "%s", "Transport device associated");
 }
 
 // Iccom device transport (store) attribute for associating
@@ -4978,85 +5105,69 @@ no_transport:
 // @count {number} size of buffer from user space
 //
 // RETURNS:
-//      count: all data processed
+//  count: ok
+//    < 0: errors
 static ssize_t transport_store(
-                struct device *dev, struct device_attribute *attr,
-                const char *buf, size_t count)
+		struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
 {
-        struct iccom_dev *iccom_dev_data =
-                                (struct iccom_dev *)dev_get_drvdata(dev);
-        struct dummy_transport_data * dummyDeviceData = NULL;
-        struct device *dummy_transport_device = NULL;
-        char device_name[MAX_CHARACTERS + 1];
-        int ret;
+	struct iccom_dev *iccom = 
+				(struct iccom_dev *)dev_get_drvdata(dev);
+	struct iccom_test_transport_dev * iccom_test_transport = NULL;
+	struct device *iccom_test_transport_device = NULL;
+	char device_name[ICCOM_TRANSPORT_DEVICE_NAME_MAX_CHARACTERS + 1];
+	int ret;
 
-        if(IS_ERR_OR_NULL(iccom_dev_data)) {
-                goto invalid_params;
-        }
+	if (IS_ERR_OR_NULL(iccom)) {
+		iccom_err("Iccom device data is null.");
+		return -EFAULT;
+	}
 
-        if(!IS_ERR_OR_NULL(iccom_dev_data->xfer_device)) {
-                goto transport_device_associated_already;
-        }
+	if (!IS_ERR_OR_NULL(iccom->xfer_device)) {
+		iccom_err("Transport test device is already associated.");
+		return -EINVAL;
+	}
 
-        if(count > MAX_CHARACTERS) {
-                goto transport_device_name_to_big;
-        }
+	if (count > ICCOM_TRANSPORT_DEVICE_NAME_MAX_CHARACTERS) {
+		iccom_err("Transport test device Name is bigger than it should be.");
+		return -EINVAL;
+	}
 
-        memcpy(device_name, buf, count);
-        device_name[count] = '\0';
+	memcpy(device_name, buf, count);
+	device_name[count] = '\0';
 
-        dummy_transport_device =
-                bus_find_device_by_name(&platform_bus_type, NULL, device_name);
+	iccom_test_transport_device = 
+		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
-        if(IS_ERR_OR_NULL(dummy_transport_device)) {
-                goto transport_device_not_valid;
-        }
+	if (IS_ERR_OR_NULL(iccom_test_transport_device)) {
+		iccom_err("Transport test device is null.");
+		return -EFAULT;
+	}
 
-        dummyDeviceData = (struct dummy_transport_data *)
-                                        dev_get_drvdata(dummy_transport_device);
+	iccom_test_transport = (struct iccom_test_transport_dev *)
+					dev_get_drvdata(iccom_test_transport_device);
 
-        if(IS_ERR_OR_NULL(dummyDeviceData)) {
-                goto transport_device_data_invalid;
-        }
+	if (IS_ERR_OR_NULL(iccom_test_transport)) {
+		iccom_err("Transport test device data is null.");
+		return -EFAULT;
+	}
 
-        if(IS_ERR_OR_NULL(dummyDeviceData->duplex_iface)) {
-                goto transport_device_iface_not_valid;
-        }
+	if (IS_ERR_OR_NULL(iccom_test_transport->duplex_iface)) {
+		iccom_err("Transport test device data iface is null.");
+		return -EFAULT;
+	}
 
-        ret = iccom_init_binded(
-                        iccom_dev_data, dummyDeviceData->duplex_iface,
-                        (void*)dummy_transport_device);
+	ret = iccom_init_binded(
+			iccom, iccom_test_transport->duplex_iface,
+			(void*)iccom_test_transport_device);
 
-        if(ret != 0) {
-                goto iccom_init_failed;
-        }
+	if (ret != 0) {
+		iccom_err("Iccom Init failed with the provided device.");
+		return -EINVAL;
+	}
 
-
-
-        iccom_warning("Iccom device binding to transport device was sucessful");
-        return count;
-
-iccom_init_failed:
-        iccom_err("Iccom Init failed with the provided device.");
-        return count;
-transport_device_name_to_big:
-        iccom_err("Transport device Name is bigger than it should be.");
-        return count;
-transport_device_associated_already:
-        iccom_err("Transport device is already associated.");
-        return count;
-transport_device_iface_not_valid:
-        iccom_err("Transport device iface is invalid.");
-        return count;
-transport_device_data_invalid:
-        iccom_err("Transport device data is invalid.");
-        return count;
-transport_device_not_valid:
-        iccom_err("Transport device does not exist.");
-        return count;
-invalid_params:
-        iccom_err("Invalid parameters.");
-        return count;
+	iccom_warning("Iccom device binding to transport device was sucessful");
+	return count;
 }
 
 static DEVICE_ATTR_RW(transport);
@@ -5069,62 +5180,60 @@ static DEVICE_ATTR_RW(transport);
 // @buf {valid ptr} buffer to write output to user space
 //
 // RETURNS:
-//      0: length of data is zero - no data
-//      > 0: data size of data to be showed in user space
+//      0: no data to be displayed
+//    > 0: size of data to be showed in user space
 static ssize_t statistics_show(
-                struct device *dev, struct device_attribute *attr, char *buf)
+		struct device *dev, struct device_attribute *attr, char *buf)
 {
-        const int BUFFER_SIZE = 2048;
-        struct iccom_dev *iccom_dev_data = (struct iccom_dev *)dev_get_drvdata(dev);
+	const int BUFFER_SIZE = 2048;
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
 
-        if(IS_ERR_OR_NULL(iccom_dev_data)) {
-                goto invalid_params;
-        }
+	if (IS_ERR_OR_NULL(iccom)) {
+		iccom_err("Iccom device data is null.");
+		return scnprintf(buf, PAGE_SIZE, "%s", "Statistics error.");
+	}
 
-        const struct iccom_dev_statistics * const stats =
-                                                &iccom_dev_data->p->statistics;
+	const struct iccom_dev_statistics * const stats = 
+						&iccom->p->statistics;
 
-        size_t len = (size_t)snprintf(buf, BUFFER_SIZE
-                     , "transport_layer: xfers done:  %llu\n"
-                       "transport_layer: bytes xfered:  %llu\n"
-                       "packages: xfered total:  %llu\n"
-                       "packages: sent ok:  %llu\n"
-                       "packages: received ok:  %llu\n"
-                       "packages: sent fail (total):  %llu\n"
-                       "packages: received fail (total):  %llu\n"
-                       "packages:     received corrupted:  %llu\n"
-                       "packages:     received duplicated:  %llu\n"
-                       "packages:     detailed parsing failed:  %llu\n"
-                       "packages: in tx queue:  %lu\n"
-                       "packets: received ok:  %llu\n"
-                       "messages: received ok:  %llu\n"
-                       "messages: ready rx:  %lu\n"
-                       "bandwidth: consumer bytes received:\t%llu\n"
-                       "\n"
-                       "Note: this is only general statistical/monitoring"
-                       " info and is not expected to be used in precise"
-                       " measurements due to atomic selfconsistency"
-                       " maintenance would put overhead in the driver.\n"
-                     , stats->transport_layer_xfers_done_count
-                     , stats->raw_bytes_xfered_via_transport_layer
-                     , stats->packages_xfered
-                     , stats->packages_sent_ok
-                     , stats->packages_received_ok
-                     , stats->packages_xfered - stats->packages_sent_ok
-                     , stats->packages_xfered - stats->packages_received_ok
-                     , stats->packages_bad_data_received
-                     , stats->packages_duplicated_received
-                     , stats->packages_parsing_failed
-                     , stats->packages_in_tx_queue
-                     , stats->packets_received_ok
-                     , stats->messages_received_ok
-                     , stats->messages_ready_in_storage
-                     , stats->total_consumers_bytes_received_ok);
+	size_t len = (size_t)scnprintf(buf, BUFFER_SIZE,
+			"transport_layer: xfers done:  %llu\n"
+			"transport_layer: bytes xfered:  %llu\n"
+			"packages: xfered total:  %llu\n"
+			"packages: sent ok:  %llu\n"
+			"packages: received ok:  %llu\n"
+			"packages: sent fail (total):  %llu\n"
+			"packages: received fail (total):  %llu\n"
+			"packages:     received corrupted:  %llu\n"
+			"packages:     received duplicated:  %llu\n"
+			"packages:     detailed parsing failed:  %llu\n"
+			"packages: in tx queue:  %lu\n"
+			"packets: received ok:  %llu\n"
+			"messages: received ok:  %llu\n"
+			"messages: ready rx:  %lu\n"
+			"bandwidth: consumer bytes received:\t%llu\n"
+			"\n"
+			"Note: this is only general statistical/monitoring"
+			" info and is not expected to be used in precise"
+			" measurements due to atomic selfconsistency"
+			" maintenance would put overhead in the driver.\n"
+			,stats->transport_layer_xfers_done_count
+			,stats->raw_bytes_xfered_via_transport_layer
+			,stats->packages_xfered
+			,stats->packages_sent_ok
+			,stats->packages_received_ok
+			,stats->packages_xfered - stats->packages_sent_ok
+			,stats->packages_xfered - stats->packages_received_ok
+			,stats->packages_bad_data_received
+			,stats->packages_duplicated_received
+			,stats->packages_parsing_failed
+			,stats->packages_in_tx_queue
+			,stats->packets_received_ok
+			,stats->messages_received_ok
+			,stats->messages_ready_in_storage
+			,stats->total_consumers_bytes_received_ok);
 
-        return len++;
-
-invalid_params:
-        return sprintf(buf, "Statistics file read error.");
+	return len++;
 }
 
 static DEVICE_ATTR_RO(statistics);
@@ -5137,43 +5246,44 @@ static DEVICE_ATTR_RO(statistics);
 // @buf {valid ptr} buffer to read input from user space
 //
 // RETURNS:
-// 0: length of data is zero - no data
-// > 0: data size of data to be showed in user space
+//      0: no data to be displayed
+//    > 0: size of data to be showed in user space
+//    < 0: errors
 static ssize_t channel_show(
-                struct kobject *kobj, struct kobj_attribute *attr, char *buf) {
+		struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	unsigned ch_id = 0;
+	struct device *iccom_dev = NULL;
+	struct iccom_dev *iccom = NULL;
+	size_t data_size = 0;
 
-        unsigned channel_id = 0;
-        struct device *iccom_dev = NULL;
-        struct iccom_dev *iccom_dev_data = NULL;
-        size_t data_size = 0;
+	if (IS_ERR_OR_NULL(kobj->parent)) {
+		iccom_err("Sysfs channel parent is null.");
+		return -EFAULT;
+	}
 
-        if(IS_ERR_OR_NULL(kobj->parent)) {
-                goto invalid_params;
-        }
+	iccom_dev = kobj_to_dev(kobj->parent);
 
-        iccom_dev = kobj_to_dev(kobj->parent);
+	if (IS_ERR_OR_NULL(iccom_dev)) {
+		iccom_err("Sysfs channel iccom device is null.");
+		return -EFAULT;
+	}
 
-        if(IS_ERR_OR_NULL(iccom_dev)) {
-                goto invalid_params;
-        }
+	iccom = (struct iccom_dev*)dev_get_drvdata(iccom_dev);
 
-        iccom_dev_data = (struct iccom_dev*)dev_get_drvdata(iccom_dev);
+	if (IS_ERR_OR_NULL(iccom)) {
+		iccom_err("Iccom device data is null.");
+		return -EFAULT;
+	}
 
-        if(IS_ERR_OR_NULL(iccom_dev_data)) {
-                goto invalid_params;
-        }
+	if (kstrtouint(attr->attr.name,10,&ch_id) != 0) {
+		iccom_err("Sysfs channel id is not an unsigned int.");
+		return -EINVAL;
+	}
 
-        if(kstrtouint(attr->attr.name,10,&channel_id) != 0) {
-                goto invalid_params;
-        }
+	__iccom_test_sysfs_ch_pop_msg_by_ch_id(iccom, ch_id, buf, &data_size);
 
-        __get_sysfs_channel_msg(iccom_dev_data, channel_id, buf, &data_size);
-
-        return data_size;
-
-invalid_params:
-        iccom_err("channel show failed\n");
-        return 0;
+	return data_size;
 }
 
 // Channel (store) attribute, for writing data
@@ -5185,65 +5295,51 @@ invalid_params:
 // @count {number} size of buffer from user space
 //
 // RETURNS:
-// count: all data processed
+//  count: ok
+//    < 0: errors
 static ssize_t channel_store(
-                struct kobject *kobj, struct kobj_attribute *attr,
-                const char *buf, size_t count) {
+		struct kobject *kobj, struct kobj_attribute *attr,
+		const char *buf, size_t count)
+{
+	unsigned ch_id = 0;
 
-        int ret;
-        unsigned channel_id = 0;
-        char *simulationData = NULL;
-        struct device *device = NULL;
-        struct iccom_dev *iccom_dev_data = NULL;
+	if (kstrtouint(attr->attr.name, 10, &ch_id) != 0) {
+		iccom_err("Sysfs channel id is not an unsigned int.");
+		return -EINVAL;
+	}
 
-        ret = kstrtouint(attr->attr.name, 10, &channel_id);
+	if (IS_ERR_OR_NULL(kobj->parent)) {
+		iccom_err("Sysfs channel parent is null.");
+		return -EFAULT;
+	}
 
-        if(ret != 0) {
-                goto invalid_params;
-        }
+	struct device *iccom_dev = kobj_to_dev(kobj->parent);
 
-        if(IS_ERR_OR_NULL(kobj->parent)) {
-                goto invalid_params;
-        }
+	if (IS_ERR_OR_NULL(iccom_dev)) {
+		iccom_err("Sysfs channel iccom device is null.");
+		return -EFAULT;
+	}
 
-        device = kobj_to_dev(kobj->parent);
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(iccom_dev);
 
-        if(IS_ERR_OR_NULL(device)) {
-                goto invalid_params;
-        }
+	if (IS_ERR_OR_NULL(iccom)) {
+		iccom_err("Iccom device data is null.");
+		return -EFAULT;
+	}
 
-        iccom_dev_data = (struct iccom_dev *)dev_get_drvdata(device);
+	int ret = iccom_post_message(
+		iccom,
+		buf,
+		(const size_t)count,
+		ch_id,
+		1);
 
-        if(IS_ERR_OR_NULL(iccom_dev_data)) {
-                goto invalid_params;
-        }
+	if (ret < 0) {
+		iccom_err("Failed to post message for channel %d with result %d",
+				ch_id, ret);
+	}
 
-        simulationData = (char *) kmalloc(count, GFP_KERNEL);
-
-        if(IS_ERR_OR_NULL(simulationData)) {
-                goto invalid_params;
-        }
-
-        memcpy(simulationData, buf, count);
-
-        ret = iccom_post_message(
-                iccom_dev_data,
-                simulationData,
-                count,
-                channel_id,
-                1);
-
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                "Sent to iccom for channel %d: with result %d: and data: %s",
-                channel_id, ret, simulationData);
-
-        kfree(simulationData);
-
-        return count;
-
-invalid_params:
-        iccom_err("channel show failed");
-        return -EFAULT;
+	return count;
 }
 
 // Channel control (store) attribute, for creating or
@@ -5255,71 +5351,73 @@ invalid_params:
 // @count {number} size of buffer from user space
 //
 // RETURNS:
-// count: all data processed
+//  count: ok
+//    < 0: errors
 static ssize_t channels_ctl_store(
-                struct device *dev, struct device_attribute *attr,
-                const char *buf, size_t count) {
+		struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	char opt;
+	int ret;
+	ssize_t sysfs_result;
+	unsigned int ch_id;
+	static char channel_name[ICCOM_TEST_SYSFS_CH_CMD_MAX_CHAR+1];
+	struct iccom_dev *iccom = NULL;
+	struct kernfs_node* knode = NULL;
 
-        char opt;
-        int ret;
-        int ch_num;
-        static char name[3];
-        struct iccom_dev *iccom_dev_data = NULL;
-        struct kernfs_node* knode = NULL;
+	if (2 != sscanf(buf,"%c%u", &opt, &ch_id)) {
+		iccom_err("Sysfs channel input shall have a character and a unsigned int.");
+		return -EINVAL;
+	}
 
-        if(2 != sscanf(buf,"%c %d", &opt, &ch_num)) {
-                goto invalid_params;
-        }
+	scnprintf(channel_name, sizeof(channel_name)/sizeof(char), "%d", ch_id);
 
-        sprintf(name,"%d",ch_num);
+	iccom = (struct iccom_dev *)dev_get_drvdata(dev);
 
-        iccom_dev_data = (struct iccom_dev *)dev_get_drvdata(dev);
+	knode = sysfs_get_dirent(iccom->channels_root->sd, channel_name);
 
-        static struct kobj_attribute channel_attr = {
-                .attr = { .name = name, .mode = SYSFS_CHANNEL_PERMISSIONS },
-                .show = channel_show,
-                .store = channel_store,
-        };
+	static struct kobj_attribute channel_attr = {
+		.attr = { .name = channel_name, .mode = ICCOM_TEST_SYSFS_CHANNEL_PERMISSIONS },
+		.show = channel_show,
+		.store = channel_store,
+	};
 
-        if(opt == 'c') {
-                knode = sysfs_get_dirent(iccom_dev_data->channels_root->sd,name);
-                if(!IS_ERR_OR_NULL(knode)) {
-                        goto channel_already_exists;
-                }
-                ret = sysfs_create_file(iccom_dev_data->channels_root,
-                                                        &channel_attr.attr);
-                if(ret == 0) {
-                        __create_sysfs_channel(iccom_dev_data, ch_num);
-                        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                                "Channel no. %d, result %d",ch_num,ret);
-                }
+	if (opt == ICCOM_SYSFS_CREATE_CHANNEL) {
+		if (!IS_ERR_OR_NULL(knode)) {
+			iccom_err("Sysfs channel already exists");
+			return -EINVAL;
+		}
+		ret = sysfs_create_file(iccom->channels_root,
+							&channel_attr.attr);
+		if (ret != 0) {
+			iccom_err("Sysfs channel file creation failed");
+			return -EINVAL;
+		}
 
-        }
-        else if(opt == 'd') {
-                knode = sysfs_get_dirent(iccom_dev_data->channels_root->sd,name);
-                if(IS_ERR_OR_NULL(knode)) {
-                        goto channel_not_found;
-                }
-                sysfs_remove_file(iccom_dev_data->channels_root,&channel_attr.attr);
-                __destroy_sysfs_channel(iccom_dev_data, ch_num);
-                iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                                "Destroyed channel %d",ch_num);
-        }
-        else {
-                goto invalid_params;
-        }
+		sysfs_result = iccom_test_sysfs_ch_add_by_iccom(iccom, ch_id);
+		if (sysfs_result != 0) {
+			iccom_err("Sysfs channel list add failed");
+			sysfs_remove_file(iccom->channels_root, &channel_attr.attr);
+			return sysfs_result;
+		}
+	} else if (opt == ICCOM_SYSFS_DELETE_CHANNEL) {
+		if (IS_ERR_OR_NULL(knode)) {
+			iccom_err("Sysfs channel does not exist");
+			return -EINVAL;
+		}
+		sysfs_remove_file(iccom->channels_root, &channel_attr.attr);
+		
+		sysfs_result = iccom_test_sysfs_ch_del_by_iccom(iccom, ch_id);
+		if (sysfs_result != 0) {
+			iccom_err("Sysfs channel list removal failed");
+			return sysfs_result;
+		}
+	} else {
+		iccom_err("Sysfs channel operation shall be either a c or d");
+		return -EINVAL;
+	}
 
-        return count;
-
-invalid_params:
-        iccom_err("Invalid parameters");
-        return -EFAULT;
-channel_not_found:
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Channel %d not found",ch_num);
-        return -EINVAL;
-channel_already_exists:
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Channel %d already exists.",ch_num);
-        return -EINVAL;
+	return count;
 }
 
 static DEVICE_ATTR_WO(channels_ctl);
@@ -5330,10 +5428,10 @@ static DEVICE_ATTR_WO(channels_ctl);
 // @dev_attr_statistics the ICCom statistics file
 // @dev_attr_channels_ctl the ICCOM channels file
 static struct attribute *iccom_dev_attrs[] = {
-        &dev_attr_transport.attr,
-        &dev_attr_statistics.attr,
-        &dev_attr_channels_ctl.attr,
-        NULL,
+	&dev_attr_transport.attr,
+	&dev_attr_statistics.attr,
+	&dev_attr_channels_ctl.attr,
+	NULL,
 };
 
 ATTRIBUTE_GROUPS(iccom_dev);
@@ -5344,9 +5442,9 @@ ATTRIBUTE_GROUPS(iccom_dev);
 // @owner the module owner
 // @class_groups group holding all the attributes
 static struct class iccom_class = {
-        .name = "iccom",
-        .owner = THIS_MODULE,
-        .class_groups = iccom_class_groups
+	.name = "iccom",
+	.owner = THIS_MODULE,
+	.class_groups = iccom_class_groups
 };
 
 // Registers the ICCom class for sysfs
@@ -5354,13 +5452,13 @@ static struct class iccom_class = {
 // RETURNS:
 //      0: ok
 //      !0: nok
-int iccom_sysfs_init(void) {
-        return class_register(&iccom_class);
+int iccom_test_sysfs_iccom_class_register(void) {
+	return class_register(&iccom_class);
 };
 
 // Unregisters the ICCom class for sysfs
-void iccom_sysfs_destroy(void) {
-        class_unregister(&iccom_class);
+void iccom_test_sysfs_iccom_class_unregister(void) {
+	class_unregister(&iccom_class);
 };
 
 // Iccom device probe which initializes the device
@@ -5369,42 +5467,36 @@ void iccom_sysfs_destroy(void) {
 // @pdev {valid ptr} iccom device
 //
 // RETURNS:
-//      0: probing ok
-//      -EINVAL: device is null pointer
-//      -ENOMEM: no memory to allocate
+//      0: ok
+//     <0: errors
 static int iccom_probe(struct platform_device *pdev) {
-        struct iccom_dev *iccom_dev_data;
+	struct iccom_dev *iccom;
 
-        if(IS_ERR_OR_NULL(pdev)) {
-                goto invalid_params;
-        }
+	if (IS_ERR_OR_NULL(pdev)) {
+		iccom_err("Probing a Iccom Device failed - pdev NULL pointer!");
+		return -EINVAL;
+	}
 
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                        "Probing a Iccom Device with id: %d", pdev->id);
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+			"Probing a Iccom Device with id: %d", pdev->id);
 
-        iccom_dev_data = (struct iccom_dev *)
-                                 kmalloc(sizeof(struct iccom_dev), GFP_KERNEL);
+	iccom = (struct iccom_dev *)
+				kmalloc(sizeof(struct iccom_dev), GFP_KERNEL);
 
-        if (IS_ERR_OR_NULL(iccom_dev_data)) {
-                goto no_memory;
-        }
+	if (IS_ERR_OR_NULL(iccom)) {
+		iccom_err("Iccom device data is null. Failed to allocate the memory.");
+		return -ENOMEM;
+	}
 
-        dev_set_drvdata(&pdev->dev, iccom_dev_data);
+	dev_set_drvdata(&pdev->dev, iccom);
 
-        __initialize_sysfs_channels_list(iccom_dev_data);
+	__iccom_test_sysfs_initialize_ch_list(iccom);
 
-        // Create channels directory
-        iccom_dev_data->channels_root =
-                kobject_create_and_add(SYSFS_CHANNEL_ROOT, &(pdev->dev.kobj));
+	// Create channels directory
+	iccom->channels_root = 
+		kobject_create_and_add(ICCOM_TEST_SYSFS_CHANNEL_ROOT, &(pdev->dev.kobj));
 
-        return 0;
-
-invalid_params:
-        iccom_warning("Probing a Iccom Device failed - NULL pointer!");
-        return -EINVAL;
-no_memory:
-        iccom_warning("Probing a Iccom Device failed - no space in device!");
-        return -ENOMEM;
+	return 0;
 };
 
 // Iccom device remove which deinitialize the device
@@ -5413,46 +5505,43 @@ no_memory:
 // @pdev {valid ptr} iccom device
 //
 // RETURNS:
-//      0: probing ok
-//      -EINVAL: device is null pointer
+//      0: ok
+//     <0: errors
 static int iccom_remove(struct platform_device *pdev) {
 
-        struct iccom_dev *iccom_dev_data;
+	struct iccom_dev *iccom;
 
-        if(IS_ERR_OR_NULL(pdev)) {
-                goto invalid_params;
-        }
+	if (IS_ERR_OR_NULL(pdev)) {
+		iccom_err("Iccom pdev is null.");
+		return -EFAULT;
+	}
 
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                        "Removing a Iccom Device with id: %d", pdev->id);
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+			"Removing a Iccom Device with id: %d", pdev->id);
 
-        iccom_dev_data = (struct iccom_dev *)dev_get_drvdata(&pdev->dev);
+	iccom = (struct iccom_dev *)dev_get_drvdata(&pdev->dev);
 
-        if (IS_ERR_OR_NULL(iccom_dev_data)) {
-                goto invalid_params;
-        }
+	if (IS_ERR_OR_NULL(iccom)) {
+		iccom_err("Iccom device data is null.");
+		return -EFAULT;
+	}
 
-        iccom_close_binded(iccom_dev_data);
-        __destroy_sysfs_channels_list(iccom_dev_data);
-        kobject_put(iccom_dev_data->channels_root);
-        kfree(iccom_dev_data);
-        iccom_dev_data = NULL;
+	iccom_close_binded(iccom);
+	__iccom_test_sysfs_ch_del(iccom);
+	kobject_put(iccom->channels_root);
+	kfree(iccom);
+	iccom = NULL;
 
-        return 0;
-
-invalid_params:
-        iccom_warning("Removing a Iccom Device failed - NULL pointer!");
-        return -EINVAL;
-
+	return 0;
 };
 
 // The ICCom driver compatible definition
 //
 // @compatible name of compatible driver
 struct of_device_id iccom_driver_id[] = {
-        {
-                .compatible = "iccom",
-        }
+	{
+		.compatible = "iccom",
+	}
 };
 
 // The ICCom driver definition
@@ -5465,14 +5554,14 @@ struct of_device_id iccom_driver_id[] = {
 // @driver::of_match_table compatible driver devices
 // @driver::dev_groups devices groups with all attributes
 struct platform_driver iccom_driver = {
-        .probe = iccom_probe,
-        .remove = iccom_remove,
-        .driver = {
-                .owner = THIS_MODULE,
-                .name = "iccom",
-                .of_match_table = iccom_driver_id,
-                .dev_groups = iccom_dev_groups
-        }
+	.probe = iccom_probe,
+	.remove = iccom_remove,
+	.driver = {
+		.owner = THIS_MODULE,
+		.name = "iccom",
+		.of_match_table = iccom_driver_id,
+		.dev_groups = iccom_dev_groups
+	}
 };
 
 /*------------------- FULL DUPLEX INTERFACE AUXILIAR ------------------------*/
@@ -5481,23 +5570,23 @@ struct platform_driver iccom_driver = {
 //
 // @xfer {valid ptr} transfer structure
 void xfer_init(struct full_duplex_xfer *xfer) {
-        memset(xfer, 0, sizeof(struct full_duplex_xfer));
+	memset(xfer, 0, sizeof(struct full_duplex_xfer));
 }
 
 // Frees all owned by @xfer data
 //
 // @xfer {valid ptr} transfer structure
 void xfer_free(struct full_duplex_xfer *xfer) {
-        if (IS_ERR_OR_NULL(xfer)) {
-                return;
-        }
-        if (!IS_ERR_OR_NULL(xfer->data_tx)) {
-                kfree(xfer->data_tx);
-        }
-        if (!IS_ERR_OR_NULL(xfer->data_rx_buf)) {
-                kfree(xfer->data_rx_buf);
-        }
-        memset(xfer, 0, sizeof(struct full_duplex_xfer));
+	if (IS_ERR_OR_NULL(xfer)) {
+		return;
+	}
+	if (!IS_ERR_OR_NULL(xfer->data_tx)) {
+		kfree(xfer->data_tx);
+	}
+	if (!IS_ERR_OR_NULL(xfer->data_rx_buf)) {
+		kfree(xfer->data_rx_buf);
+	}
+	memset(xfer, 0, sizeof(struct full_duplex_xfer));
 }
 
 // Write the data received from user space into the xfer
@@ -5512,29 +5601,29 @@ void xfer_free(struct full_duplex_xfer *xfer) {
 //      -EINVAL: xfer is null pointer
 //      -ENOMEM: no memory to allocate
 int iccom_sysfs_test_update_wire_data(
-                struct xfer_device_data *xfer_dev,
-                char data_transport_to_iccom[],
-                size_t data_transport_to_iccom_size)
+		struct xfer_device_data *xfer_dev,
+		char data_transport_to_iccom[],
+		size_t data_transport_to_iccom_size)
 {
-        if (IS_ERR_OR_NULL(&xfer_dev->xfer)) {
-                return -EINVAL;
-        }
+	if (IS_ERR_OR_NULL(&xfer_dev->xfer)) {
+		return -EINVAL;
+	}
 
-        if (!IS_ERR_OR_NULL(xfer_dev->xfer.data_rx_buf)) {
-                kfree(xfer_dev->xfer.data_rx_buf);
-        }
+	if (!IS_ERR_OR_NULL(xfer_dev->xfer.data_rx_buf)) {
+		kfree(xfer_dev->xfer.data_rx_buf);
+	}
 
-        if (!IS_ERR_OR_NULL(data_transport_to_iccom) &&
-                data_transport_to_iccom_size) {
-                xfer_dev->xfer.size_bytes = data_transport_to_iccom_size;
-                xfer_dev->xfer.data_rx_buf =
-                        kmalloc(xfer_dev->xfer.size_bytes, GFP_KERNEL);
-                if (!xfer_dev->xfer.data_rx_buf) {
-                        return -ENOMEM;
-                }
-                memcpy(xfer_dev->xfer.data_rx_buf, data_transport_to_iccom,
-                        xfer_dev->xfer.size_bytes);
-        }
+	if (!IS_ERR_OR_NULL(data_transport_to_iccom) &&
+		data_transport_to_iccom_size) {
+		xfer_dev->xfer.size_bytes = data_transport_to_iccom_size;
+		xfer_dev->xfer.data_rx_buf =
+			kmalloc(xfer_dev->xfer.size_bytes, GFP_KERNEL);
+		if (!xfer_dev->xfer.data_rx_buf) {
+			return -ENOMEM;
+		}
+		memcpy(xfer_dev->xfer.data_rx_buf, data_transport_to_iccom,
+			xfer_dev->xfer.size_bytes);
+	}
 
 	// NOTE: the actual xfer will happen on-read (wire data show)
 	// 	to keep the US in sync. The total workflow goes:
@@ -5549,7 +5638,7 @@ int iccom_sysfs_test_update_wire_data(
 	// 		* ICCom updates the current xfer with new data
 	xfer_dev->got_us_data = true;
 
-        return 0;
+	return 0;
 }
 
 // Deep copy of src xfer to a dst xfer
@@ -5560,41 +5649,40 @@ int iccom_sysfs_test_update_wire_data(
 //
 // RETURNS:
 //      0: ok
-//      -EINVAL: xfer is null pointer
-//      -ENOMEM: no memory to allocate
+//     <0: errors
 int deep_xfer_copy(struct full_duplex_xfer *src, struct full_duplex_xfer *dst) {
-        if (IS_ERR_OR_NULL(src) || IS_ERR_OR_NULL(dst)) {
-                return -EINVAL;
-        }
+	if (IS_ERR_OR_NULL(src) || IS_ERR_OR_NULL(dst)) {
+		return -EINVAL;
+	}
 
-        xfer_free(dst);
+	xfer_free(dst);
 
-        dst->size_bytes = src->size_bytes;
+	dst->size_bytes = src->size_bytes;
 
-        if (!IS_ERR_OR_NULL(src->data_tx) && src->size_bytes) {
-                dst->data_tx = kmalloc(dst->size_bytes, GFP_KERNEL);
-                if (!dst->data_tx) {
-                        return -ENOMEM;
-                }
-                memcpy(dst->data_tx, src->data_tx, dst->size_bytes);
-        }
+	if (!IS_ERR_OR_NULL(src->data_tx) && src->size_bytes) {
+		dst->data_tx = kmalloc(dst->size_bytes, GFP_KERNEL);
+		if (IS_ERR_OR_NULL(dst->data_tx)) {
+			return -ENOMEM;
+		}
+		memcpy(dst->data_tx, src->data_tx, dst->size_bytes);
+	}
 
-        if (!IS_ERR_OR_NULL(src->data_rx_buf) && src->size_bytes) {
-                dst->data_rx_buf = kmalloc(dst->size_bytes, GFP_KERNEL);
-                if (!dst->data_rx_buf) {
-                        kfree(dst->data_tx);
-                        dst->data_tx = NULL;
-                        return -ENOMEM;
-                }
-                memcpy(dst->data_rx_buf, src->data_rx_buf
-                        , dst->size_bytes);
-        }
+	if (!IS_ERR_OR_NULL(src->data_rx_buf) && src->size_bytes) {
+		dst->data_rx_buf = kmalloc(dst->size_bytes, GFP_KERNEL);
+		if (IS_ERR_OR_NULL(dst->data_rx_buf)) {
+			kfree(dst->data_tx);
+			dst->data_tx = NULL;
+			return -ENOMEM;
+		}
+		memcpy(dst->data_rx_buf, src->data_rx_buf
+			, dst->size_bytes);
+	}
 
-        dst->xfers_counter = src->xfers_counter;
-        dst->id = src->id;
-        dst->consumer_data = src->consumer_data;
-        dst->done_callback = src->done_callback;
-        return 0;
+	dst->xfers_counter = src->xfers_counter;
+	dst->id = src->id;
+	dst->consumer_data = src->consumer_data;
+	dst->done_callback = src->done_callback;
+	return 0;
 }
 
 // Iterates on the next xfer id for transmission
@@ -5604,14 +5692,14 @@ int deep_xfer_copy(struct full_duplex_xfer *src, struct full_duplex_xfer *dst) {
 // RETURNS:
 //      >0: id of the next xfer
 int iterate_to_next_xfer_id(struct xfer_device_data *xfer_dev) {
-        int res = xfer_dev->next_xfer_id;
+	int res = xfer_dev->next_xfer_id;
 
-        xfer_dev->next_xfer_id++;
+	xfer_dev->next_xfer_id++;
 
-        if (xfer_dev->next_xfer_id < 0) {
-                xfer_dev->next_xfer_id = 1;
-        }
-        return res;
+	if (xfer_dev->next_xfer_id < 0) {
+		xfer_dev->next_xfer_id = 1;
+	}
+	return res;
 }
 
 // Accepts the data from iccom, copies its original
@@ -5623,21 +5711,21 @@ int iterate_to_next_xfer_id(struct xfer_device_data *xfer_dev) {
 //
 // RETURNS:
 //      0: ok
-//      <0: error happened
+//     <0: errors
 int accept_data(
-                struct xfer_device_data* xfer_dev,
-                struct __kernel full_duplex_xfer *xfer)
+		struct xfer_device_data* xfer_dev,
+		struct __kernel full_duplex_xfer *xfer)
 {
-        // Copy xfer to dev xfer as is. In later
-        // stage override the data_rx_buf in iccom_sysfs_test_update_wire_data
-        int res = deep_xfer_copy(xfer, &xfer_dev->xfer);
-        if (res < 0) {
-                return res;
-        }
+	// Copy xfer to dev xfer as is. In later
+	// stage override the data_rx_buf in iccom_sysfs_test_update_wire_data
+	int res = deep_xfer_copy(xfer, &xfer_dev->xfer);
+	if (res < 0) {
+		return res;
+	}
 
-        xfer_dev->xfer.id = iterate_to_next_xfer_id(xfer_dev);
+	xfer_dev->xfer.id = iterate_to_next_xfer_id(xfer_dev);
 
-        return xfer_dev->xfer.id;
+	return xfer_dev->xfer.id;
 }
 
 // Function to trigger an exchange of data between
@@ -5647,26 +5735,26 @@ int accept_data(
 __maybe_unused
 static void iccom_transport_exchange_data(struct xfer_device_data *xfer_dev)
 {
-        if (IS_ERR_OR_NULL(xfer_dev->xfer.done_callback)) {
-                return;
-        }
+	if (IS_ERR_OR_NULL(xfer_dev->xfer.done_callback)) {
+		return;
+	}
 
-        bool start_immediately = false;
-        struct full_duplex_xfer *next_xfer
-                        = xfer_dev->xfer.done_callback(
-                                &xfer_dev->xfer,
-                                xfer_dev->next_xfer_id,
-                                &start_immediately,
-                                xfer_dev->xfer.consumer_data);
+	bool start_immediately = false;
+	struct full_duplex_xfer *next_xfer
+			= xfer_dev->xfer.done_callback(
+				&xfer_dev->xfer,
+				xfer_dev->next_xfer_id,
+				&start_immediately,
+				xfer_dev->xfer.consumer_data);
 
 	// for a new xfer US must provide a new data, so dropping the flag
 	xfer_dev->got_us_data = false;
 
-        if (IS_ERR_OR_NULL(next_xfer)) {
+	if (IS_ERR_OR_NULL(next_xfer)) {
 		return;
-        }
+	}
 
-        accept_data(xfer_dev, next_xfer);
+	accept_data(xfer_dev, next_xfer);
 }
 
 /*------------------- FULL DUPLEX INTERFACE API ----------------------------*/
@@ -5686,17 +5774,16 @@ static void iccom_transport_exchange_data(struct xfer_device_data *xfer_dev)
 //
 // RETURNS:
 //      0: ok
-//      -ENODEV: no transport device provided
-//      -EHOSTDOWN: xfer device is in shutdown
+//     <0: errors
 __maybe_unused
 int data_xchange(
-                void __kernel *device , struct __kernel full_duplex_xfer *xfer,
-                bool force_size_change)
+		void __kernel *device , struct __kernel full_duplex_xfer *xfer,
+		bool force_size_change)
 {
-        DUMMY_TRANSPORT_DEV_TO_XFER_DEV_DATA;
-        DUMMY_TRANSPORT_CHECK_DEVICE(device, return -ENODEV);
-        DUMMY_TRANSPORT_XFER_DEV_ON_FINISH(return -EHOSTDOWN);
-        return 0;
+	ICCOM_TEST_TRANSPORT_DEV_TO_XFER_DEV_DATA;
+	ICCOM_TEST_TRANSPORT_CHECK_DEVICE(device, return -ENODEV);
+	ICCOM_TEST_TRANSPORT_XFER_DEV_ON_FINISH(return -EHOSTDOWN);
+	return 0;
 }
 
 // API
@@ -5718,7 +5805,7 @@ int default_data_update(
                 void __kernel *device, struct full_duplex_xfer *xfer,
                 bool force_size_change)
 {
-        DUMMY_TRANSPORT_DEV_TO_XFER_DEV_DATA;
+        ICCOM_TEST_TRANSPORT_DEV_TO_XFER_DEV_DATA;
         return accept_data(xfer_dev_data, xfer);
 }
 
@@ -5736,10 +5823,10 @@ int default_data_update(
 //      false: not running
 __maybe_unused
 bool is_running(void __kernel *device) {
-        DUMMY_TRANSPORT_DEV_TO_XFER_DEV_DATA;
-        DUMMY_TRANSPORT_CHECK_DEVICE(device, return false);
-        DUMMY_TRANSPORT_XFER_DEV_ON_FINISH(return false);
-        return xfer_dev_data->running;
+	ICCOM_TEST_TRANSPORT_DEV_TO_XFER_DEV_DATA;
+	ICCOM_TEST_TRANSPORT_CHECK_DEVICE(device, return false);
+	ICCOM_TEST_TRANSPORT_XFER_DEV_ON_FINISH(return false);
+	return xfer_dev_data->running;
 }
 
 // API
@@ -5754,17 +5841,17 @@ bool is_running(void __kernel *device) {
 //
 // RETURNS:
 //      0: ok
-//      <0: failed
+//     <0: errors
 __maybe_unused
 int init(void __kernel *device, struct full_duplex_xfer *default_xfer) {
-        DUMMY_TRANSPORT_DEV_TO_XFER_DEV_DATA;
-        DUMMY_TRANSPORT_CHECK_DEVICE(device, return -ENODEV);
-        xfer_init(&xfer_dev_data->xfer);
-        xfer_dev_data->next_xfer_id = 1;
-        xfer_dev_data->finishing = false;
-        xfer_dev_data->running = true;
+	ICCOM_TEST_TRANSPORT_DEV_TO_XFER_DEV_DATA;
+	ICCOM_TEST_TRANSPORT_CHECK_DEVICE(device, return -ENODEV);
+	xfer_init(&xfer_dev_data->xfer);
+	xfer_dev_data->next_xfer_id = 1;
+	xfer_dev_data->finishing = false;
+	xfer_dev_data->running = true;
 	xfer_dev_data->got_us_data = false;
-        return accept_data(xfer_dev_data, default_xfer);
+	return accept_data(xfer_dev_data, default_xfer);
 }
 
 // API
@@ -5778,15 +5865,15 @@ int init(void __kernel *device, struct full_duplex_xfer *default_xfer) {
 //
 // RETURNS:
 //      0: ok
-//      -ENODEV: no transport device provided
+//     <0: errors
 __maybe_unused
 int close(void __kernel *device) {
-        DUMMY_TRANSPORT_DEV_TO_XFER_DEV_DATA;
-        DUMMY_TRANSPORT_CHECK_DEVICE(device, return -ENODEV);
-        xfer_dev_data->finishing = true;
-        xfer_dev_data->running = false;
-        xfer_free(&xfer_dev_data->xfer);
-        return 0;
+	ICCOM_TEST_TRANSPORT_DEV_TO_XFER_DEV_DATA;
+	ICCOM_TEST_TRANSPORT_CHECK_DEVICE(device, return -ENODEV);
+	xfer_dev_data->finishing = true;
+	xfer_dev_data->running = false;
+	xfer_free(&xfer_dev_data->xfer);
+	return 0;
 }
 
 // API
@@ -5801,14 +5888,14 @@ int close(void __kernel *device) {
 //
 // RETURNS:
 //      0: ok
-//      <0: failed
+//     <0: errors
 __maybe_unused
 int reset(void __kernel *device, struct full_duplex_xfer *default_xfer) {
-        close(device);
-        return init(device, default_xfer);
+	close(device);
+	return init(device, default_xfer);
 }
 
-/*------------------- DUMMY TRANSPORT DEVICE ----------------------------*/
+/*------------------- ICCOM TEST TRANSPORT DEVICE ----------------------------*/
 
 // Parse the hex string into a byte array.
 //
@@ -5847,7 +5934,7 @@ ssize_t iccom_parse_hex_str(const char *str, const size_t str_len
 
 	// errors block
 	if (IS_ERR_OR_NULL(str)) {
-	    	iccom_err("broken string ptr.");
+		iccom_err("broken string ptr.");
 		return -EINVAL;
 	}
 	if (str[str_len] != 0) {
@@ -5873,30 +5960,30 @@ ssize_t iccom_parse_hex_str(const char *str, const size_t str_len
 		return -EINVAL;
 	}
 
-        char tmp[CHARS_PER_BYTE + 1];
+	char tmp[CHARS_PER_BYTE + 1];
 	tmp[CHARS_PER_BYTE] = 0;
 
 	int w_idx = 0;
-        for (int i = 0; i <= str_len - CHARS_PER_BYTE; i += CHARS_PER_BYTE) {
-                memcpy(tmp, str + i, CHARS_PER_BYTE);
+	for (int i = 0; i <= str_len - CHARS_PER_BYTE; i += CHARS_PER_BYTE) {
+		memcpy(tmp, str + i, CHARS_PER_BYTE);
 
-        	unsigned int val;
-                int res = kstrtouint(tmp, 16, &val);
+		unsigned int val;
+		int res = kstrtouint(tmp, 16, &val);
 
-                if (res != 0) {
+		if (res != 0) {
 			iccom_err("failed at part: %s", tmp);
 			return val;
-                }
+		}
 		if (val > 0xFF) {
 			iccom_err("failed, part overflow: %s", tmp);
 			return val;
 		}
 		*(bytearray__out + w_idx++) = (uint8_t)val;
-        }
+	}
 
 	#undef CHARS_PER_BYTE
 
-        return w_idx;
+	return w_idx;
 }
 
 // Encode the iccom data sent to transport by
@@ -5908,17 +5995,18 @@ ssize_t iccom_parse_hex_str(const char *str, const size_t str_len
 // @data_iccom_to_transport {array} array holding the data to be copied
 // @data_iccom_to_transport_size {number} size of array
 void encode_iccom_to_transport_data(
-                char *buffer, ssize_t *buffer_size,
-                const uint8_t data_iccom_to_transport[],
-                const size_t data_iccom_to_transport_size)
+		char *buffer, size_t *buffer_size,
+		const uint8_t data_iccom_to_transport[],
+		const size_t data_iccom_to_transport_size)
 {
-        *buffer_size = 0;
+	*buffer_size = 0;
 
-        for(int i = 0; i < data_iccom_to_transport_size; i++)
-        {
-                *buffer_size += sprintf(buffer + *buffer_size,
-                                        "%02x", data_iccom_to_transport[i]);
-        }
+	for(int i = 0; i < data_iccom_to_transport_size; i++)
+	{
+		*buffer_size += scnprintf(buffer + *buffer_size,
+						PAGE_SIZE - *buffer_size,
+						"%02x", data_iccom_to_transport[i]);
+	}
 }
 
 // Transport device R (show) attribute for checking if
@@ -5929,43 +6017,43 @@ void encode_iccom_to_transport_data(
 // @buf {valid ptr} buffer to write output to user space
 //
 // RETURNS:
-//      0: length of data is zero - no data
-//      > 0: data size of data to be showed in user space
+//      0: No data
+//      > 0: size of data to be showed in user space
 static ssize_t R_show(
-                struct device *dev, struct device_attribute *attr, char *buf)
+		struct device *dev, struct device_attribute *attr, char *buf)
 {
-        if(IS_ERR_OR_NULL(dev)) {
-	    	iccom_err("the wire transport kernel dev not provided");
+	if(IS_ERR_OR_NULL(dev)) {
+		iccom_err("the wire transport kernel dev not provided");
 		return -EINVAL;
-        }
-        struct dummy_transport_data * transport_dev
-        	= (struct dummy_transport_data *)dev_get_drvdata(dev);
-        if(IS_ERR_OR_NULL(transport_dev)) {
-	    	iccom_err("the wire transport dev broken ptr");
+	}
+	struct iccom_test_transport_dev * transport_dev
+		= (struct iccom_test_transport_dev *)dev_get_drvdata(dev);
+	if(IS_ERR_OR_NULL(transport_dev)) {
+		iccom_err("the wire transport dev broken ptr");
 		return -EINVAL;
-        }
-        struct xfer_device_data *xfer_dev = transport_dev->xfer_dev_data;
-        if(IS_ERR_OR_NULL(xfer_dev)) {
-	    	iccom_err("the xfer dev broken ptr");
+	}
+	struct xfer_device_data *xfer_dev = transport_dev->xfer_dev_data;
+	if(IS_ERR_OR_NULL(xfer_dev)) {
+		iccom_err("the xfer dev broken ptr");
 		return -EINVAL;
-        }
+	}
 	if (!xfer_dev->got_us_data) {
-	    	iccom_err("to read something you need to write something first =)");
+		iccom_err("to read something you need to write something first =)");
 		return -EPROTO;
 	}
 
-        ssize_t buffer_size = 0;
+	ssize_t buffer_size = 0;
 	// TODO: @Luis
 	// 	* The range check must be here
 	// 	* The buffer size via return value is way simpler
-        encode_iccom_to_transport_data(
-                buf, &buffer_size, (uint8_t*)xfer_dev->xfer.data_tx,
-                xfer_dev->xfer.size_bytes);
+	encode_iccom_to_transport_data(
+		buf, &buffer_size, (uint8_t*)xfer_dev->xfer.data_tx,
+		xfer_dev->xfer.size_bytes);
 
 	// Do the actual xfer here, cause
-        iccom_transport_exchange_data(xfer_dev);
+	iccom_transport_exchange_data(xfer_dev);
 
-        return buffer_size;
+	return buffer_size;
 }
 
 static DEVICE_ATTR_RO(R);
@@ -5980,37 +6068,35 @@ static DEVICE_ATTR_RO(R);
 // 	which is automatically appended by sysfs subsystem
 //
 // RETURNS:
-//      count: all data processed
+//  count: ok
+//    < 0: errors
 static ssize_t W_store(
-                struct device *dev, struct device_attribute *attr,
-                const char *data, size_t count)
+		struct device *dev, struct device_attribute *attr,
+		const char *data, size_t count)
 {
 	const size_t total_count = count;
 	char buf[count + 1];
 	memcpy(buf, data, count + 1);
 
-        struct dummy_transport_data * transport_dev_data  = NULL;
+	struct iccom_test_transport_dev * iccom_test_transport = NULL;
 
-        transport_dev_data = (struct dummy_transport_data *)dev_get_drvdata(dev);
+	iccom_test_transport = (struct iccom_test_transport_dev *)dev_get_drvdata(dev);
 
-        if(IS_ERR_OR_NULL(transport_dev_data)) {
-                goto invalid_params;
-        }
+	struct xfer_device_data *xfer_dev = iccom_test_transport->xfer_dev_data;
 
-        struct xfer_device_data *xfer_dev = transport_dev_data->xfer_dev_data;
-
-        if(IS_ERR_OR_NULL(xfer_dev)) {
-                goto invalid_params;
-        }
+	if(IS_ERR_OR_NULL(xfer_dev)) {
+		iccom_warning("Transport Device is null!");
+		return -EFAULT;
+	}
 
 	if (count >= PAGE_SIZE) {
-	    iccom_warning("Sysfs data can not fit the 0-terminator.");
-	    return -EINVAL;
+		iccom_warning("Sysfs data can not fit the 0-terminator.");
+		return -EINVAL;
 	}
 	// NOTE: count is a lenth without the last 0-terminator char
 	if (buf[count] != 0) {
-	    iccom_warning("NON-null-terminated string is provided by sysfs.");
-	    return -EINVAL;
+		iccom_warning("NON-null-terminated string is provided by sysfs.");
+		return -EINVAL;
 	}
 	// trim the end a bit
 	while (count > 0 && ((buf[count - 1] == '\n') || (buf[count - 1] == ' ')
@@ -6018,27 +6104,23 @@ static ssize_t W_store(
 		buf[count-- - 1] = 0;
 	}
 	
-        char wire_data[ICCOM_DATA_XFER_SIZE_BYTES];
-        ssize_t xfer_size = iccom_parse_hex_str(buf, count,
+	char wire_data[ICCOM_DATA_XFER_SIZE_BYTES];
+	ssize_t xfer_size = iccom_parse_hex_str(buf, count,
 						wire_data, sizeof(wire_data));
 
 	#ifdef ICCOM_DEBUG
 	print_hex_dump(KERN_INFO, ICCOM_LOG_PREFIX"Sim RX data: ", 0, 16
-		       , 1, wire_data, xfer_size, true);
+			, 1, wire_data, xfer_size, true);
 	#endif
 
-        if (xfer_size < 0) {
+	if (xfer_size < 0) {
 		iccom_warning("transport Device Decoding failed for str: %s"
-			      , buf);
+				, buf);
 		return -EINVAL;
-        }
+	}
 
-        iccom_sysfs_test_update_wire_data(xfer_dev, wire_data, xfer_size);
-        return total_count;
-
-invalid_params:
-        iccom_warning("Transport Device Write data to iccom device failed!");
-        return -EFAULT;
+	iccom_sysfs_test_update_wire_data(xfer_dev, wire_data, xfer_size);
+	return total_count;
 }
 
 static DEVICE_ATTR_WO(W);
@@ -6053,61 +6135,57 @@ static DEVICE_ATTR_WO(W);
 // @count {number} size of buffer from user space
 //
 // RETURNS:
-// count: all data processed
+//  count: ok
+//    < 0: errors
 static ssize_t showRW_ctl_store(
-                struct device *dev, struct device_attribute *attr,
-                const char *buf, size_t count) {
-        unsigned int result;
+		struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	unsigned int result;
 
-        int ret = kstrtouint(buf,10,&result);
-        if(ret < 0 || (result > 2))
-                goto invalid_params;
+	if (kstrtouint(buf, 10, &result) != 0) {
+		iccom_err("Value received is not an unsigned int.");
+		return -EINVAL;
+	}
+	
+	if (result > 2) {
+		iccom_err("Value shall be 0 or 1 to enable/disable RW files");
+		return -EINVAL;
+	}
 
-        struct kernfs_node* knode_R = sysfs_get_dirent(dev->kobj.sd,"R");
-        struct kernfs_node* knode_W = sysfs_get_dirent(dev->kobj.sd,"W");
+	struct kernfs_node* knode_R = sysfs_get_dirent(dev->kobj.sd,"R");
+	struct kernfs_node* knode_W = sysfs_get_dirent(dev->kobj.sd,"W");
 
-        if(result == 1) {
-                // Create RW files
-                if(knode_R != NULL || knode_W != NULL)
-                        goto RW_exists;
+	if (result == ICCOM_SYSFS_CREATE_RW_FILES) {
+		if (!IS_ERR_OR_NULL(knode_R) || !IS_ERR_OR_NULL(knode_W)) {
+			iccom_err("Files already exist");
+			return -EINVAL;
+		}
 
-                ret = device_create_file(dev,&dev_attr_R);
-                if(ret != 0)
-                        goto error;
+		if (device_create_file(dev, &dev_attr_R) != 0) {
+			iccom_err("Error creating files");
+			return -EINVAL;
+		}
 
-                ret = device_create_file(dev,&dev_attr_W);
-                if(ret != 0) {
-                        device_remove_file(dev,&dev_attr_R);
-                        goto error;
-                }
+		if (device_create_file(dev, &dev_attr_W) != 0) {
+			device_remove_file(dev, &dev_attr_R);
+			iccom_err("Error creating files");
+			return -EINVAL;
+		}
+	} else if (result == ICCOM_SYSFS_REMOVE_RW_FILES) {
+		if (IS_ERR_OR_NULL(knode_R) || IS_ERR_OR_NULL(knode_W)) {
+			iccom_err("Files do not exist");
+			return -EFAULT;
+		}
 
-                iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Created R/W");
-        }
-        else {
-                // Remove RW files
-                if(IS_ERR_OR_NULL(knode_R) || IS_ERR_OR_NULL(knode_W))
-                        goto RW_dont_exist;
+		device_remove_file(dev,&dev_attr_R);
+		device_remove_file(dev,&dev_attr_W);
+	} else {
+		iccom_err("To create or remove RW files the option shall be 0 or 1");
+		return -EINVAL;
+	}
 
-                device_remove_file(dev,&dev_attr_R);
-                device_remove_file(dev,&dev_attr_W);
-
-                iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,"Destroying R/W files");
-        }
-
-        return count;
-
-invalid_params:
-        iccom_err("Invalid parameters");
-        return -EFAULT;
-RW_exists:
-        iccom_err("Files already exist");
-        return -EINVAL;
-RW_dont_exist:
-        iccom_err("Files don't exist");
-        return -EINVAL;
-error:
-        iccom_err("Error creating files");
-        return count;
+	return count;
 }
 
 static DEVICE_ATTR_WO(showRW_ctl);
@@ -6115,15 +6193,15 @@ static DEVICE_ATTR_WO(showRW_ctl);
 // List of all Transport device attributes
 //
 // @dev_attr_showRW_ctl the Transport file to create/delete the R and W files
-static struct attribute *dummy_transport_dev_attrs[] = {
-        &dev_attr_showRW_ctl.attr,
-        NULL,
+static struct attribute *iccom_test_transport_dev_attrs[] = {
+	&dev_attr_showRW_ctl.attr,
+	NULL,
 };
 
-ATTRIBUTE_GROUPS(dummy_transport_dev);
+ATTRIBUTE_GROUPS(iccom_test_transport_dev);
 
-// Transport create device (store) class attribute for
-// dummy transport devices
+// Sysfs file to create Iccom Test Transport
+// devices via user space
 //
 // @class {valid ptr} transport class
 // @attr {valid ptr} device attribute properties
@@ -6131,31 +6209,31 @@ ATTRIBUTE_GROUPS(dummy_transport_dev);
 // @count {number} size of buffer from user space
 //
 // RETURNS:
-//      count: all data processed
+//  count: ok
+//    < 0: errors
 static ssize_t create_transport_store(
-                struct class *class, struct class_attribute *attr,
-                const char *buf, size_t count)
+		struct class *class, struct class_attribute *attr,
+		const char *buf, size_t count)
 {
-        struct platform_device * new_pdev;
+	// Allocate one unused ID
+	int device_id = ida_alloc(&iccom_test_transport_dev_id,GFP_KERNEL);
 
-        // Allocate one unused ID
-        int device_id = ida_alloc(&dummy_transport_device_id,GFP_KERNEL);
+	if (device_id < 0) {
+		iccom_err("Could not allocate a new unused ID");
+		return -EINVAL;
+	}
 
-        if(device_id < 0) {
-                iccom_err("Could not allocate a new unused ID");
-                return -EINVAL;
-        }
+	struct platform_device *new_pdev = 
+		platform_device_register_simple("iccom_test_transport",
+							device_id, NULL, 0);
 
-        new_pdev = platform_device_register_simple("dummy_transport",
-                                                         device_id, NULL, 0);
+	if (IS_ERR_OR_NULL(new_pdev)) {
+		iccom_err("Could not register the device iccom_test_transport.%d",
+								device_id);
+		return -EFAULT;
+	}
 
-        if(IS_ERR_OR_NULL(new_pdev)) {
-                iccom_err("Could not register the device dummy_transport.%d",
-                                                                device_id);
-                return -EFAULT;
-        }
-
-        return count;
+	return count;
 }
 
 static CLASS_ATTR_WO(create_transport);
@@ -6163,22 +6241,22 @@ static CLASS_ATTR_WO(create_transport);
 // List of all Transport class attributes
 //
 // @class_attr_create_transport the create device file of Transport
-static struct attribute *dummy_transport_class_attrs[] = {
-        &class_attr_create_transport.attr,
-        NULL
+static struct attribute *iccom_test_transport_class_attrs[] = {
+	&class_attr_create_transport.attr,
+	NULL
 };
 
-ATTRIBUTE_GROUPS(dummy_transport_class);
+ATTRIBUTE_GROUPS(iccom_test_transport_class);
 
 // The Transport class definition
 //
 // @name class name
 // @owner the module owner
 // @class_groups group holding all the attributes
-static struct class dummy_transport_class = {
-    .name = "dummy_transport",
+static struct class iccom_test_transport_class = {
+    .name = "iccom_test_transport",
     .owner = THIS_MODULE,
-    .class_groups = dummy_transport_class_groups
+    .class_groups = iccom_test_transport_class_groups
 };
 
 // Registers the Transport class for sysfs
@@ -6186,132 +6264,129 @@ static struct class dummy_transport_class = {
 // RETURNS:
 //      0: ok
 //      !0: nok
-int dummy_transport_sysfs_init(void) {
-        return class_register(&dummy_transport_class);
+int iccom_test_sysfs_transport_class_register(void) {
+	return class_register(&iccom_test_transport_class);
 };
 
 // Unregisters the ICCom class for sysfs
-void dummy_transport_sysfs_destroy(void) {
-        class_unregister(&dummy_transport_class);
+void iccom_test_sysfs_transport_class_unregister(void) {
+	class_unregister(&iccom_test_transport_class);
 };
 
 // Transport device probe which initializes the device
-// and allocates the dummy_transport_data
+// and allocates the iccom_test_transport_dev
 //
 // @pdev {valid ptr} transport device
 //
 // RETURNS:
-//      0: probing ok
-//      -EINVAL: device is null pointer
-//      -ENOMEM: no memory to allocate
-static int dummy_transport_probe(struct platform_device *pdev) {
-        struct dummy_transport_data *transport_dev_data;
+//      0: ok
+//     <0: errors
+static int iccom_test_transport_probe(struct platform_device *pdev) {
+	struct iccom_test_transport_dev *iccom_test_transport;
 
-        if(IS_ERR_OR_NULL(pdev)) {
-                goto invalid_params;
-        }
+	if (IS_ERR_OR_NULL(pdev)) {
+		iccom_err("Transport test device pdev is null.");
+		return -EFAULT;
+	}
 
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                "Probing a Dummy Transport Device with id: %d", pdev->id);
+	iccom_test_transport = (struct iccom_test_transport_dev *) 
+		kmalloc(sizeof(struct iccom_test_transport_dev), GFP_KERNEL);
 
-        transport_dev_data = (struct dummy_transport_data *)
-                kmalloc(sizeof(struct dummy_transport_data), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(iccom_test_transport)) {
+		iccom_err("Transport test device allocation failed");
+		return -ENOMEM;
+	}
 
-        if(IS_ERR_OR_NULL(transport_dev_data)) {
-                goto no_memory;
-        }
+	iccom_test_transport->duplex_iface = (struct full_duplex_sym_iface *)
+		kmalloc(sizeof(struct full_duplex_sym_iface), GFP_KERNEL);
 
-        transport_dev_data->duplex_iface = (struct full_duplex_sym_iface *)
-                kmalloc(sizeof(struct full_duplex_sym_iface), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(iccom_test_transport->duplex_iface)) {
+		goto no_memory_full_duplex;
+	}
 
-        if(IS_ERR_OR_NULL(transport_dev_data->duplex_iface)) {
-                kfree(transport_dev_data);
-                transport_dev_data = NULL;
-                goto no_memory;
-        }
+	iccom_test_transport->xfer_dev_data = (struct xfer_device_data *) 
+			kmalloc(sizeof(struct xfer_device_data), GFP_KERNEL);
 
-        transport_dev_data->xfer_dev_data = (struct xfer_device_data *)
-                        kmalloc(sizeof(struct xfer_device_data), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(iccom_test_transport->xfer_dev_data)) {
+		goto no_memory_xfer_data;
+	}
 
-        if(IS_ERR_OR_NULL(transport_dev_data->xfer_dev_data)) {
-                kfree(transport_dev_data->duplex_iface);
-                transport_dev_data->duplex_iface  = NULL;
-                kfree(transport_dev_data);
-                transport_dev_data = NULL;
-                goto no_memory;
-        }
+	/* Full duplex interface definition */
+	iccom_test_transport->duplex_iface->data_xchange = &data_xchange;
+	iccom_test_transport->duplex_iface->default_data_update = &default_data_update;
+	iccom_test_transport->duplex_iface->is_running = &is_running;
+	iccom_test_transport->duplex_iface->init = &init;
+	iccom_test_transport->duplex_iface->reset = &reset;
+	iccom_test_transport->duplex_iface->close = &close;
 
-        /* Full duplex interface definition */
-        transport_dev_data->duplex_iface->data_xchange = &data_xchange;
-        transport_dev_data->duplex_iface->default_data_update = &default_data_update;
-        transport_dev_data->duplex_iface->is_running = &is_running;
-        transport_dev_data->duplex_iface->init = &init;
-        transport_dev_data->duplex_iface->reset = &reset;
-        transport_dev_data->duplex_iface->close = &close;
+	dev_set_drvdata(&pdev->dev, iccom_test_transport);
 
-        dev_set_drvdata(&pdev->dev, transport_dev_data);
+	return 0;
 
-        return 0;
-
-invalid_params:
-        iccom_warning("Probing a Transport Device failed - NULL pointer!");
-        return -EINVAL;
-no_memory:
-        iccom_warning("Probing a Transport Device failed - no space in device!");
-        return -ENOMEM;
+no_memory_full_duplex:
+	iccom_err("Transport test device full duplex allocation failed");
+	kfree(iccom_test_transport);
+	iccom_test_transport = NULL;
+	return -ENOMEM;
+no_memory_xfer_data:
+	iccom_err("Transport test device xfer device allocation failed");
+	kfree(iccom_test_transport->duplex_iface);
+	iccom_test_transport->duplex_iface  = NULL;
+	kfree(iccom_test_transport);
+	iccom_test_transport = NULL;
+	return -ENOMEM;
 };
 
 // Transport device remove which deinitialize the device
-// and frees the dummy_transport_data
+// and frees the iccom_test_transport_dev
 //
 // @pdev {valid ptr} transport device
 //
 // RETURNS:
-//      0: probing ok
-//      -EINVAL: device is null pointer
-static int dummy_transport_remove(struct platform_device *pdev) {
-        struct dummy_transport_data *transport_dev_data;
+//      0: ok
+//     <0: errors
+static int iccom_test_transport_remove(struct platform_device *pdev) {
+	struct iccom_test_transport_dev *iccom_test_transport;
 
-        if(IS_ERR_OR_NULL(pdev)) {
-                goto invalid_params;
-        }
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                "Removing a Dummy Transport Device with id: %d", pdev->id);
+	if (IS_ERR_OR_NULL(pdev)) {
+		iccom_err("Transport test device pdev is null.");
+		return -EFAULT;
+	}
 
-        transport_dev_data = (struct dummy_transport_data *)
-                                                dev_get_drvdata(&pdev->dev);
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+		"Removing a iccom test transport device with id: %d", pdev->id);
 
-        if(IS_ERR_OR_NULL(transport_dev_data)) {
-                goto invalid_params;
-        }
+	iccom_test_transport = (struct iccom_test_transport_dev *)
+						dev_get_drvdata(&pdev->dev);
 
-        if(transport_dev_data->duplex_iface != NULL) {
-                kfree(transport_dev_data->duplex_iface);
-                transport_dev_data->duplex_iface = NULL;
-        }
+	if (IS_ERR_OR_NULL(iccom_test_transport)) {
+		iccom_err("Transport test data is null.");
+		return -EFAULT;
+	}
 
-        if(transport_dev_data->xfer_dev_data != NULL) {
-                kfree(transport_dev_data->xfer_dev_data);
-                transport_dev_data->xfer_dev_data = NULL;
-        }
+	if (!IS_ERR_OR_NULL(iccom_test_transport->duplex_iface)) {
+		kfree(iccom_test_transport->duplex_iface);
+		iccom_test_transport->duplex_iface = NULL;
+	}
 
-        kfree(transport_dev_data);
-        transport_dev_data = NULL;
+	if (!IS_ERR_OR_NULL(iccom_test_transport->xfer_dev_data)) {
+		kfree(iccom_test_transport->xfer_dev_data);
+		iccom_test_transport->xfer_dev_data = NULL;
+	}
 
-        return 0;
+	kfree(iccom_test_transport);
+	iccom_test_transport = NULL;
 
-invalid_params:
-        iccom_warning("Removing a Transport Device failed - NULL device!");
-        return -EINVAL;
-};
+	return 0;
+}
 
 // The Transport driver compatible definition
 //
 // @compatible name of compatible driver
-struct of_device_id dummy_transport_driver_id[] = {
-        {
-                .compatible = "dummy_transport",
-        }
+struct of_device_id iccom_test_transport_driver_id[] = {
+	{
+		.compatible = "iccom_test_transport",
+	}
 };
 
 // The Transport driver definition
@@ -6323,15 +6398,15 @@ struct of_device_id dummy_transport_driver_id[] = {
 // @driver::name name of driver
 // @driver::of_match_table compatible driver devices
 // @driver::dev_groups devices groups with all attributes
-struct platform_driver dummy_transport_driver = {
-        .probe = dummy_transport_probe,
-        .remove = dummy_transport_remove,
-        .driver = {
-                .owner = THIS_MODULE,
-                .name = "dummy_transport",
-                .of_match_table = dummy_transport_driver_id,
-                .dev_groups = dummy_transport_dev_groups
-        }
+struct platform_driver iccom_test_transport_driver = {
+	.probe = iccom_test_transport_probe,
+	.remove = iccom_test_transport_remove,
+	.driver = {
+		.owner = THIS_MODULE,
+		.name = "iccom_test_transport",
+		.of_match_table = iccom_test_transport_driver_id,
+		.dev_groups = iccom_test_transport_dev_groups
+	}
 };
 
 // Module init method to register
@@ -6344,27 +6419,26 @@ struct platform_driver dummy_transport_driver = {
 //     !0: nok
 static int __init iccom_module_init(void)
 {
-        int ret;
+	int ret;
 
-        __iccom_crc32_gen_lookup_table();
+	__iccom_crc32_gen_lookup_table();
 
-        ida_init(&iccom_device_id);
-        ida_init(&dummy_transport_device_id);
+	ida_init(&iccom_dev_id);
+	ida_init(&iccom_test_transport_dev_id);
 
-        ret = platform_driver_register(&iccom_driver);
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                                "Iccom Driver Register result: %d", ret);
-        iccom_sysfs_init();
+	ret = platform_driver_register(&iccom_driver);
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+				"Iccom Driver Register result: %d", ret);
+	iccom_test_sysfs_iccom_class_register();
+
+	ret = platform_driver_register(&iccom_test_transport_driver);
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+				"Transport Driver Register result: %d", ret);
+	iccom_test_sysfs_transport_class_register();
 
 
-        ret = platform_driver_register(&dummy_transport_driver);
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-                                "Transport Driver Register result: %d", ret);
-        dummy_transport_sysfs_init();
-
-
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "module loaded");
-        return ret;
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "module loaded");
+	return ret;
 }
 
 // Module exit method to unregister
@@ -6377,16 +6451,16 @@ static int __init iccom_module_init(void)
 //     !0: nok
 static void __exit iccom_module_exit(void)
 {
-        ida_destroy(&iccom_device_id);
-        ida_destroy(&dummy_transport_device_id);
+	ida_destroy(&iccom_dev_id);
+	ida_destroy(&iccom_test_transport_dev_id);
 
-        iccom_sysfs_destroy();
-        platform_driver_unregister(&iccom_driver);
+	iccom_test_sysfs_iccom_class_unregister();
+	platform_driver_unregister(&iccom_driver);
 
-        dummy_transport_sysfs_destroy();
-        platform_driver_unregister(&dummy_transport_driver);
+	iccom_test_sysfs_transport_class_unregister();
+	platform_driver_unregister(&iccom_test_transport_driver);
 
-        iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "module unloaded");
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "module unloaded");
 }
 
 module_init(iccom_module_init);

@@ -37,24 +37,37 @@
 // transport layer failed
 #define ICCOM_ERROR_TRANSPORT 2
 
-
 // size of data xfer in bytes
 #define ICCOM_DATA_XFER_SIZE_BYTES 64
 // size of data acknoledgement xfer in bytes
 #define ICCOM_ACK_XFER_SIZE_BYTES 1
 
-#define MAX_CHARACTERS                        50U
-#define MAX_CHANNEL_MSG_ALLOWED               50U
+// defines the sysfs enabling value to create the
+// RW files for iccom transport test manipulation
+// via user space
+#define ICCOM_SYSFS_CREATE_RW_FILES 1U
+// defines the sysfs disabling value to remove the
+// RW files for iccom transport test manipulation
+// via user space
+#define ICCOM_SYSFS_REMOVE_RW_FILES 0U
 
-// Describes the dummy transport data
-//
-// @full_duplex_sym_iface {ptr valid} full duplex interface
-// @xfer_device_data {ptr valid} dummy transport device
-struct dummy_transport_data
-{
-        struct full_duplex_sym_iface * duplex_iface;
-        struct xfer_device_data *xfer_dev_data; 
-};
+// defines the sysfs create channel character
+// to be used to create channels
+#define ICCOM_SYSFS_CREATE_CHANNEL 'c'
+// defines the sysfs destroy channel character
+// to be used to destroy channels
+#define ICCOM_SYSFS_DELETE_CHANNEL 'd'
+
+// defines the iccom version we are currently at
+#define ICCOM_VERSION "2820bb7e0e3668815ce6e0a7cf019ec3664eaf10"
+
+// maximum size for sysfs channel store command
+#define ICCOM_TEST_SYSFS_CH_CMD_MAX_CHAR			25U
+// maximum size for device test transport name
+#define ICCOM_TRANSPORT_DEVICE_NAME_MAX_CHARACTERS		50U
+// number of maximum messages from iccom to
+// the upper layer that the list can store
+#define ICCOM_SYSFS_MAX_MSG_ALLOWED_PER_CHANNEL			50U
 
 // The message ready for customer layer callback type.
 //      @channel {valid channel number} the channel in which ready
@@ -74,29 +87,6 @@ typedef bool (*iccom_msg_ready_callback_ptr_t)( unsigned int channel
                   , void *msg_data, size_t msg_len
                   , void *consumer_data);
 
-// Describes the sysfs channels from iccom
-//
-// @channel_id {number} contains the channel identification
-// @sysfs_channel_msgs_head channels messages list head
-// @list list_head for pointing to next channel
-struct sysfs_channel {
-        unsigned int channel_id;
-        unsigned int number_of_msgs;
-        struct list_head sysfs_channel_msgs_head;
-        struct list_head list;
-};
-
-// Describes the channels messages received from iccom to upper layer
-//
-// @data {ptr valid} contains the message received from iccom
-// @size {number} number of characters in the message
-// @list list_head for pointing to next previous message
-struct sysfs_channel_msg {
-        char *data;
-        size_t size;
-        struct list_head list;
-};
-
 // Describes the ICCom data
 // @p {any} pointer to iccom_dev_private data. This pointer is managed
 //      by iccom_dev. The pointed struct is also managed by iccom device.
@@ -105,7 +95,7 @@ struct sysfs_channel_msg {
 //      pointer is passed to methods, defined by @xfer_iface.
 // @xfer_iface the structure which provides pointers to
 //      transport methods of the device, provided by @xfer_device.
-// @sysfs_channels_head the list which shall hold the user space channels
+// @sysfs_test_ch_head the list which shall hold the user space channels
 //      received data from iccom received from transport to send to upper layers
 struct iccom_dev {
         struct iccom_dev_private *p;
@@ -113,7 +103,7 @@ struct iccom_dev {
         void *xfer_device;
         struct full_duplex_sym_iface xfer_iface;
         struct kobject* channels_root;
-        struct list_head sysfs_channels_head;
+        struct list_head sysfs_test_ch_head ;
 };
 
 /* ------------------ KERNEL SPACE API DECLARATIONS ---------------------*/
@@ -147,43 +137,6 @@ int iccom_init_binded(
                 , void *full_duplex_device);
 void iccom_close_binded(struct iccom_dev *iccom);
 bool iccom_is_running(struct iccom_dev *iccom);
-
-
-/* ------------------ FULL DUPLEX API DECLARATIONS ---------------------*/
-
-// Describes the transport device data
-//
-// @xfer the xfer to execute data
-// @got_us_data true if for the given @xfer User Space has provided the
-//      wire data already (this guy is being reset every new xfer).
-// @next_xfer_id contains the next xfer id 
-//      to be transmitted
-// @running contains the status whether transport
-//      is running or not
-// @finishing contains the status whether transport
-//      is finishing its work
-struct xfer_device_data {
-        struct full_duplex_xfer xfer;
-        bool got_us_data;
-
-        int next_xfer_id;
-        bool running;
-        bool finishing;
-};
-
-__maybe_unused
-int data_xchange(void __kernel *device
-                , struct __kernel full_duplex_xfer *xfer
-                , bool force_size_change);
-int default_data_update(void __kernel *device
-                , struct full_duplex_xfer *xfer
-                , bool force_size_change);
-bool is_running(void __kernel *device);
-int init(void __kernel *device
-                , struct full_duplex_xfer *default_xfer);
-int close(void __kernel *device);
-int reset(void __kernel *device
-                , struct full_duplex_xfer *default_xfer);
 
 #define ICCOM_HEADER
 

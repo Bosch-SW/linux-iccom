@@ -15,7 +15,8 @@ default: docker-image
 # This will build the reusable Docker Stage for
 # other components to build the external kernel modules
 docker-image:
-	cd $$PWD && scripts/docker_build_wrapper.sh 	     \
+	cd $$PWD && scripts/docker_build_wrapper.sh				\
+					--progress=plain			\
 					--build-arg kernel_version=${KVER}	\
 					--tag ${DOCKER_OUT_IMAGE_TAG}		\
 					--target ${DOCKER_OUT_IMAGE_TAG}	\

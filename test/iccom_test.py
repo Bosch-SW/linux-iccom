@@ -9,14 +9,14 @@ def execute_command_with_result(command):
     return subprocess.check_output(command, shell=True, text=True)
 
 def create_iccom_device():
-    command = "echo > /sys/class/iccom/create_device"
+    command = "echo > /sys/class/iccom/create_iccom"
     execute_command(command)
 
-def create_dummy_transport_device():
-    command = "echo > /sys/class/dummy_transport/create_transport"
+def create_iccom_test_transport_device():
+    command = "echo > /sys/class/iccom_test_transport/create_transport"
     execute_command(command)
 
-def link_dummy_transport_device_to_iccom_device(
+def link_iccom_test_transport_device_to_iccom_device(
         transport_dev, iccom_dev):
     command = ("echo %s > /sys/devices/platform/%s/transport"
                % (transport_dev, iccom_dev))
@@ -327,7 +327,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(
         create_iccom_channel(iccom_device, 1)
         create_transport_device_RW_files(transport_dev)
 
-        # Send a message from ICCOM to dummy transport via channel 1
+        # Send a message from ICCOM to iccom test transport via channel 1
         iccom_write(iccom_device, 1, "Who are you?")
 
         # Default xfer
@@ -394,7 +394,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
         create_iccom_channel(iccom_device, 1)
         create_transport_device_RW_files(transport_dev)
 
-        # Send a message from ICCOM to dummy transport via channel 1
+        # Send a message from ICCOM to iccom test transport via channel 1
         iccom_write(iccom_device, 1, "Who are you?")
 
         # Do (Default xfer) Data Exchange + ACK
@@ -434,7 +434,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
         create_iccom_channel(iccom_device, 1000)
         create_transport_device_RW_files(transport_dev)
 
-        # Send a message from ICCOM to dummy transport via channel 1
+        # Send a message from ICCOM to iccom test transport via channel 1
         iccom_write(iccom_device, 1000, "Is there anybody there?")
 
         # Do (Default xfer) Data Exchange + NACK
@@ -475,31 +475,31 @@ if __name__ == '__main__':
         # iccom py start
 
         iccom_device = []
-        dummy_transport_device = []
+        iccom_test_transport_device = []
 
         iccom_device.append("iccom.0")
         iccom_device.append("iccom.1")
         iccom_device.append("iccom.2")
         iccom_device.append("iccom.3")
 
-        dummy_transport_device.append("dummy_transport.0")
-        dummy_transport_device.append("dummy_transport.1")
-        dummy_transport_device.append("dummy_transport.2")
-        dummy_transport_device.append("dummy_transport.3")
+        iccom_test_transport_device.append("iccom_test_transport.0")
+        iccom_test_transport_device.append("iccom_test_transport.1")
+        iccom_test_transport_device.append("iccom_test_transport.2")
+        iccom_test_transport_device.append("iccom_test_transport.3")
 
         ## Create iccom device instances
         for x in iccom_device:
                 create_iccom_device()
 
         # Create iccom device instances
-        for x in dummy_transport_device:
-                create_dummy_transport_device()
+        for x in iccom_test_transport_device:
+                create_iccom_test_transport_device()
 
         # Link tranport device to iccom
-        link_dummy_transport_device_to_iccom_device(dummy_transport_device[0], iccom_device[0])
-        link_dummy_transport_device_to_iccom_device(dummy_transport_device[1], iccom_device[1])
-        link_dummy_transport_device_to_iccom_device(dummy_transport_device[2], iccom_device[2])
-        link_dummy_transport_device_to_iccom_device(dummy_transport_device[3], iccom_device[3])
+        link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[0], iccom_device[0])
+        link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[1], iccom_device[1])
+        link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[2], iccom_device[2])
+        link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[3], iccom_device[3])
 
         # Test #0
         
@@ -507,22 +507,22 @@ if __name__ == '__main__':
 
         # Test #1
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_data
-                   , {"transport_dev": dummy_transport_device[1]
+                   , {"transport_dev": iccom_test_transport_device[1]
                       , "iccom_device ": iccom_device[1]})
 
         # Test #2
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_without_transport_data
-                   , {"transport_dev": dummy_transport_device[0]
+                   , {"transport_dev": iccom_test_transport_device[0]
                       , "iccom_device ": iccom_device[0]})
 
         # Test #3
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_payload_size
-                   , {"transport_dev": dummy_transport_device[2]
+                   , {"transport_dev": iccom_test_transport_device[2]
                       , "iccom_device ": iccom_device[2]})
 
         #Test #4
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack
-                   , {"transport_dev": dummy_transport_device[3]
+                   , {"transport_dev": iccom_test_transport_device[3]
                       , "iccom_device ": iccom_device[3]})
 
         ## iccom py end
