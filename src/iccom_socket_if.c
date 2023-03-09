@@ -94,10 +94,6 @@
 // NOTE: loopback channels can go also in ordinary channel area
 #define ICCOM_SK_MAX_CHANNEL_VAL 0x7FFF
 
-#define ICCOM_SK_PROC_ROOT_NAME "iccomif"
-#define ICCOM_SK_LBACKCTL_FILE_NAME "loopbackctl"
-
-#define ICCOM_SK_PROC_RW_PERMISSIONS 0600
 
 // Iccom socket device found and the msg (received from userspace)
 // was successfully dispatched.
@@ -108,7 +104,6 @@
 // Iccom socket device not found meaning cannot dispatch the msg
 // (received from userspace).
 #define ICCOM_SK_FIND_DISPATCH_DEVICE_ERR_DEVICE_NOT_FOUND		0
-
 
 /* --------------------- UTILITIES SECTION ----------------------------- */
 
@@ -225,12 +220,10 @@ struct iccom_sk_loopback_mapping_rule {
 //      of its main loop (no more socket/iccom usage), so close
 //      sequence is able to close the socket safely.
 // @socket_closed is completed as socket is closed.
-// @proc_root the root iccom_sockets directory in the proc file system
 //      this directory is now aiming to provide loopback control
 //      but later some information and other ctl functions might be
 //      added.
 // @loopback_ctl_ops loopback control file operations
-// @loopback_ctl_file the loopback control file itself
 // @lback_map_rule the channel loopback mapping rule pointer,
 //      allocated on heap.
 struct iccom_sockets_device {
@@ -245,9 +238,7 @@ struct iccom_sockets_device {
 	struct completion pump_main_loop_done;
 	struct completion socket_closed;
 
-	struct file_operations loopback_ctl_ops;
-
-	struct iccom_sk_loopback_mapping_rule *lback_map_rule;
+        struct iccom_sk_loopback_mapping_rule *lback_map_rule;
 };
 
 /* -------------------------- EXTERN VARS -------------------------------*/
@@ -599,73 +590,61 @@ static void __iccom_socket_unreg_socket_family(
 }
 
 // Provides an ability to read loopback rule from User Space.
-// Is invoked when user reads the /proc/<ICCOM_SK>/<LOOPBACK_CTL> file.
 //
-// Is restricted to the file size of SIZE_MAX bytes.
 //
 // RETURNS:
 //      >= 0: number of bytes actually provided to user space, on success
 //      < 0: negated error code, on failure
-static ssize_t __iccom_sk_lback_rule_read(struct file *file
-		, char __user *ubuf
-		, size_t count
-		, loff_t *ppos)
+static ssize_t read_loopback_rule_show(struct device *dev, 
+					struct device_attribute *attr,
+                        		char *buf)
 {
-	ICCOM_SK_CHECK_PTR(file, return -EINVAL);
-	ICCOM_SK_CHECK_PTR(ubuf, return -EINVAL);
-	ICCOM_SK_CHECK_PTR(ppos, return -EINVAL);
+        ICCOM_SK_CHECK_PTR(buf, return -EINVAL);
 
-	struct iccom_sockets_device *iccom_sk;
-	       // = (struct iccom_sockets_device *)PDE_DATA(file->f_inode);
+        struct iccom_sockets_device *iccom_sk
+                = (struct iccom_sockets_device *)dev_get_drvdata(dev);
 
-	ICCOM_SK_CHECK_DEVICE("no device provided", return -ENODEV);
+	if(IS_ERR_OR_NULL(iccom_sk)) {
+		iccom_socket_err("Invalid parameters.");
+		return -EINVAL;
+	}
 
 	const int BUFFER_SIZE = 256;
 
-	if (*ppos >= BUFFER_SIZE || *ppos > SIZE_MAX) {
-		return 0;
-	}
+        char *buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
 
-	char *buf = kmalloc(BUFFER_SIZE, GFP_KERNEL);
-
-	if (IS_ERR_OR_NULL(buf)) {
-		return -ENOMEM;
-	}
+        if (IS_ERR_OR_NULL(buffer)) {
+                iccom_socket_err("failed to create new buffer:"
+                                 " no memory");
+                return -ENOMEM;
+        }
 
 	const struct iccom_sk_loopback_mapping_rule *const rule
 			    = iccom_sk->lback_map_rule;
 
-	size_t len = (size_t)snprintf(buf, BUFFER_SIZE, "%d %d %d\n\n"
-				      "NOTE: the loopback will map the "
-				      "[a;b] channels other sides to"
-				      " [a + shift; b + shift] local "
-				      "channels where a = first argument"
-				      ", b = second argument,"
-				      " shift = third argument\n"
-				      , rule->from, rule->to, rule->shift)
-		     + 1;
+        size_t len = (size_t)snprintf(buffer, BUFFER_SIZE, "%d %d %d\n\n"
+                                      "NOTE: the loopback will map the "
+                                      "[a;b] channels other sides to"
+                                      " [a + shift; b + shift] local "
+                                      "channels where a = first argument"
+                                      ", b = second argument,"
+                                      " shift = third argument\n"
+                                      , rule->from, rule->to, rule->shift)
+                     + 1;
 
-	if (len > BUFFER_SIZE) {
-		iccom_socket_warning("loopback control output "
-				     "was too big for buffer"
-				     ", required length: %zu", len);
-		len = BUFFER_SIZE;
-		buf[BUFFER_SIZE - 1] = 0;
-	}
+        if (len > BUFFER_SIZE) {
+                iccom_socket_warning("loopback control output "
+                                     "was too big for buffer"
+                                     ", required length: %zu", len);
+                len = BUFFER_SIZE;
+                buffer[BUFFER_SIZE - 1] = 0;
+        }
 
-	const unsigned long nbytes_to_copy
-			= (len >= (size_t)(*ppos))
-				?  min(len - (size_t)(*ppos), count)
-				: 0;
-	const unsigned long not_copied
-			= copy_to_user(ubuf, buf + (size_t)(*ppos)
-				       , nbytes_to_copy);
-	kfree(buf);
-	buf = NULL;
-	*ppos += nbytes_to_copy - not_copied;
+        kfree(buffer);
 
-	return nbytes_to_copy - not_copied;
+        return len;
 }
+static DEVICE_ATTR_RO(read_loopback_rule);
 
 // @buf pointer to the beginning of the string buffer
 //      NOTE: buffer can be temporary modified within parsing
@@ -734,57 +713,51 @@ int  __iccom_sk_parse_lback_string(char *const buf
 
 // Provides an ability to update (and also disable) current loopback
 // rule from User Space.
-// Is invoked when user writes the /proc/<ICCOM_SK>/<LOOPBACK_CTL> file.
 //
-// Is restricted to the file size of SIZE_MAX bytes.
 //
 // RETURNS:
 //      >= 0: number of bytes actually were written, on success
 //      < 0: negated error code, on failure
-static ssize_t __iccom_sk_lback_rule_write(struct file *file
-		, const char __user *ubuf
-		, size_t count
-		, loff_t *ppos)
+static ssize_t set_loopback_rule_store(struct device *dev, 
+					struct device_attribute *attr,
+					const char *buf, size_t count)
 {
-	ICCOM_SK_CHECK_PTR(file, return -EINVAL);
-	ICCOM_SK_CHECK_PTR(ubuf, return -EINVAL);
+        ICCOM_SK_CHECK_PTR(buf, return -EINVAL);
 
-	struct iccom_sockets_device *iccom_sk;
-	       // = (struct iccom_sockets_device *)PDE_DATA(file->f_inode);
+        struct iccom_sockets_device *iccom_sk
+                = (struct iccom_sockets_device *)dev_get_drvdata(dev);
+	int ret = 0;
 
-	ICCOM_SK_CHECK_DEVICE("no device provided", return -ENODEV);
+        if(IS_ERR_OR_NULL(iccom_sk)) {
+		iccom_socket_err("Invalid parameters.");
+		return -EINVAL;
+	}
 
 	const unsigned int BUFFER_SIZE = 64;
 
-	// we only get the whole data at once
-	if (*ppos != 0 || count > BUFFER_SIZE) {
-		iccom_socket_warning(
-			"Ctrl message should be written at once"
-			" and not exceed %u bytes.", BUFFER_SIZE);
-		return -EFAULT;
-	}
+        // we only get the whole data at once
+        if (count > BUFFER_SIZE) {
+                iccom_socket_warning(
+                        "Ctrl message should be written at once"
+                        " and not exceed %u bytes.", BUFFER_SIZE);
+                return -EFAULT;
+        }
 
-	char *buf = kmalloc(BUFFER_SIZE, GFP_KERNEL);
+	char *buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
 
-	if (IS_ERR_OR_NULL(buf)) {
-		return -ENOMEM;
-	}
+        if (IS_ERR_OR_NULL(buffer)) {
+                iccom_socket_err("failed to create new rule buffer:"
+                                 " no memory");
+                return -ENOMEM;
+        }
+	memcpy(buffer, buf, count);
 
-	const unsigned long not_copied = copy_from_user(buf, ubuf, count);
-	ssize_t ret = 0;
-
-	if (not_copied != 0) {
-		iccom_socket_warning("Not all bytes were copied from user.");
-		ret = -EIO;
-		goto finalize;
-	}
-
-	struct iccom_sk_loopback_mapping_rule parsing_res;
-	ret = __iccom_sk_parse_lback_string(buf, count, &parsing_res);
-	if (ret < 0) {
-		iccom_socket_warning("Parsing failed: %s", buf);
-		goto finalize;
-	}
+        struct iccom_sk_loopback_mapping_rule parsing_res;
+        ret = __iccom_sk_parse_lback_string(buffer, count, &parsing_res);
+        if (ret < 0) {
+                iccom_socket_warning("Parsing failed: %s", buffer);
+                goto finalize;
+        }
 
 	struct iccom_sk_loopback_mapping_rule * new_rule
 			    = (struct iccom_sk_loopback_mapping_rule *)
@@ -815,13 +788,12 @@ finalize:
 
 	return ret;
 }
+static DEVICE_ATTR_WO(set_loopback_rule);
 
 // Helper. Initializes the loopback control on ICCom Sockets.
 //
-// NOTE: the ICCom Sockets proc rootfs should be created beforehand,
-//      if not: then we will fail to create loopback node, but
-//          the loopback default rule (turned off) will be initialized
-//          anyway.
+// NOTE: the loopback default rule (turned off) will be initialized
+//          anyway even if there is no definition of this rule later on.
 //
 // RETURNS:
 //      >= 0: on success,
@@ -831,11 +803,7 @@ static int __iccom_sk_loopback_ctl_init(
 {
 	ICCOM_SK_CHECK_DEVICE("", return -ENODEV);
 
-	// fallback state
-	memset(&iccom_sk->loopback_ctl_ops, 0
-	       , sizeof(iccom_sk->loopback_ctl_ops));
-	iccom_sk->lback_map_rule = NULL;
-//	iccom_sk->loopback_ctl_file = NULL;
+        iccom_sk->lback_map_rule = NULL;
 
 	// initial rule data
 	iccom_sk->lback_map_rule = (struct iccom_sk_loopback_mapping_rule *)
@@ -848,33 +816,10 @@ static int __iccom_sk_loopback_ctl_init(
 	}
 	memset(iccom_sk->lback_map_rule, 0, sizeof(*iccom_sk->lback_map_rule));
 
-	// loopback control ops
-	iccom_sk->loopback_ctl_ops.read = &__iccom_sk_lback_rule_read;
-	iccom_sk->loopback_ctl_ops.write = &__iccom_sk_lback_rule_write;
-
-	//if (IS_ERR_OR_NULL(iccom_sk->proc_root)) {
-	//	iccom_socket_err("failed to create loopback control proc entry:"
-	//			 " no ICCom Sockets root proc entry");
-	//	iccom_sk->loopback_ctl_file = NULL;
-	//	return -ENOENT;
-	//}
-
-	//iccom_sk->loopback_ctl_file = proc_create_data(
-	//				   ICCOM_SK_LBACKCTL_FILE_NAME
-	//				   , ICCOM_SK_PROC_RW_PERMISSIONS
-	//				   , iccom_sk->proc_root
-	//				   , &iccom_sk->loopback_ctl_ops
-	//				   , (void*)iccom_sk);
-
-	//if (IS_ERR_OR_NULL(iccom_sk->loopback_ctl_file)) {
-	//	iccom_socket_err("failed to create loopback control proc entry.");
-	//	return -EIO;
-	//}
-
-	return 0;
+        return 0;
 }
 
-// Closes the proc loopback ctl
+// Closes the iccom sk loopback controller
 static void __iccom_sk_loopback_ctl_close(
 		struct iccom_sockets_device *iccom_sk)
 {
@@ -885,16 +830,9 @@ static void __iccom_sk_loopback_ctl_close(
 			= iccom_sk->lback_map_rule;
 	    iccom_sk->lback_map_rule = NULL;
 
-	    kfree(ptr);
-	    ptr = NULL;
-	}
-
-	//if (IS_ERR_OR_NULL(iccom_sk->loopback_ctl_file)) {
-	//	return;
-	//}
-//
-	//proc_remove(iccom_sk->loopback_ctl_file);
-	//iccom_sk->loopback_ctl_file = NULL;
+            kfree(ptr);
+            ptr = NULL;
+        }
 }
 
 // Closes underlying protocol layer.
@@ -955,9 +893,7 @@ static int iccom_skif_init(struct iccom_sockets_device *iccom_sk)
 	init_completion(&iccom_sk->initialized);
 	init_completion(&iccom_sk->socket_closed);
 	init_completion(&iccom_sk->pump_main_loop_done);
-
-	//__iccom_sk_loopback_ctl_init(iccom_sk);
-
+	__iccom_sk_loopback_ctl_init(iccom_sk);
 	complete(&iccom_sk->initialized);
 
 	iccom_socket_info("iccom socket if initialization completed");
@@ -1398,7 +1334,9 @@ static DEVICE_ATTR_WO(protocol_family);
 static struct attribute *iccom_socket_if_dev_attrs[] = {
 	&dev_attr_iccom_dev.attr,
 	&dev_attr_protocol_family.attr,
-	NULL,
+	&dev_attr_read_loopback_rule.attr,
+	&dev_attr_set_loopback_rule.attr,
+        NULL,
 };
 
 ATTRIBUTE_GROUPS(iccom_socket_if_dev);
