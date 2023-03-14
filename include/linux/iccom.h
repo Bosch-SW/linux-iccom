@@ -63,8 +63,6 @@
 
 // maximum size for sysfs channel store command
 #define ICCOM_TEST_SYSFS_CH_CMD_MAX_CHAR			25U
-// maximum size for device test transport name
-#define ICCOM_TRANSPORT_DEVICE_NAME_MAX_CHARACTERS		50U
 // number of maximum messages from iccom to
 // the upper layer that the list can store
 #define ICCOM_SYSFS_MAX_MSG_ALLOWED_PER_CHANNEL			50U
@@ -95,15 +93,11 @@ typedef bool (*iccom_msg_ready_callback_ptr_t)( unsigned int channel
 //      pointer is passed to methods, defined by @xfer_iface.
 // @xfer_iface the structure which provides pointers to
 //      transport methods of the device, provided by @xfer_device.
-// @sysfs_test_ch_head the list which shall hold the user space channels
-//      received data from iccom received from transport to send to upper layers
 struct iccom_dev {
         struct iccom_dev_private *p;
 
         void *xfer_device;
         struct full_duplex_sym_iface xfer_iface;
-        struct kobject* channels_root;
-        struct list_head sysfs_test_ch_head ;
 };
 
 /* ------------------ KERNEL SPACE API DECLARATIONS ---------------------*/

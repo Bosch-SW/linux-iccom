@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.3-labs
 
-# NOTE: don't change the name of the stage, or change it in all
-#   dependencies as well.
+# NOTE: Default build for the iccom modules
+#       with its different variants
 FROM bosch-linux-full-duplex-interface:latest AS iccom
 
 # Base (default) version
@@ -14,11 +14,24 @@ RUN rm -rf ${repo_path} && mkdir -p ${repo_path}
 WORKDIR ${repo_path}
 COPY . .
 
-RUN make -C ${kernel_source_dir} M=${repo_path} CONFIG_BOSCH_ICCOM=m
+# Workqueue - use the system WQ
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+                CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM \
+        CONFIG_CHECK_SIGNATURE=n
+
+# Default build
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+                CONFIG_BOSCH_ICCOM=m \
+        CONFIG_CHECK_SIGNATURE=n
+
+# Copy Default build ko to initramfs for qemu test run
 RUN mkdir -p /builds/initramfs/content/modules/ && \
     cp ${repo_path}/src/iccom.ko \
     /builds/initramfs/content/modules/
 
+# NOTE: Run the qemu tests with the main
+#       iccom variant
 FROM iccom AS iccom-test
 
 ####### TEST BLOCK #######
