@@ -5017,7 +5017,7 @@ ssize_t iccom_test_sysfs_ch_pop_msg(
 		return length;
 	}
 
-	return 0;
+	return -EIO;
 }
 
 // Routine to retrieve a sysfs channel iccom message
@@ -5260,7 +5260,7 @@ static ssize_t transport_show(
 		struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
-
+	
 	if (IS_ERR_OR_NULL(iccom)) {
 		iccom_err("Iccom is null");
 		return scnprintf(buf, PAGE_SIZE,

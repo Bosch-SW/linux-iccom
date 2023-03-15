@@ -1,51 +1,90 @@
 import subprocess
 import zlib
 from time import sleep
+import errno
+import os
 
-def execute_command(command):
+def execute_shell_command(command):
     subprocess.run(command, shell=True)
 
-def execute_command_with_result(command):
-    return subprocess.check_output(command, shell=True, text=True)
+def read_sysfs_file(file_to_read):
+    try:
+        # Initialize Data
+        data_read = ""
+        error = None
+        
+        # Open file & read
+        with open(file_to_read, 'r') as file:
+            data_read = file.read()
+    except OSError as e:
+        # Catch the error if any
+        data_read = ""
+        error = e.errno
+
+    return str(data_read), error
+
+def write_sysfs_file(file_to_write, content_to_write):
+    try:
+        # Initialize Data
+        error = None
+        
+        # Open file & write
+        with open(file_to_write, 'w') as file:
+            file.write(content_to_write)
+    except OSError as e:
+        # Catch the error if any
+        error = e.errno
+
+        if (error != None):
+            raise RuntimeError("Unexpected error trying to write\n"
+                               "    (data to write:) %s \n"
+                               "    (file) %s \n"
+                               % (content_to_write, file_to_write))
 
 def create_iccom_device():
-    command = "echo > /sys/class/iccom/create_iccom"
-    execute_command(command)
+    file = "/sys/class/iccom/create_iccom"
+    command = " "
+    write_sysfs_file(file, command)
 
 def create_iccom_test_transport_device():
-    command = "echo > /sys/class/iccom_test_transport/create_transport"
-    execute_command(command)
+    file = "/sys/class/iccom_test_transport/create_transport"
+    command = " "
+    write_sysfs_file(file, command)
 
-def link_iccom_test_transport_device_to_iccom_device(
-        transport_dev, iccom_dev):
-    command = ("echo %s > /sys/devices/platform/%s/transport"
-               % (transport_dev, iccom_dev))
-    execute_command(command)
+def link_iccom_test_transport_device_to_iccom_device(transport_dev, iccom_dev):
+    file = "/sys/devices/platform/%s/transport" % (iccom_dev)
+    command = transport_dev
+    write_sysfs_file(file, command)
 
-def create_iccom_channel(iccom_device, channel):
-    command = "echo c%d > /sys/devices/platform/%s/channels_ctl" % (channel, iccom_device)
-    execute_command(command)
+def create_iccom_channel(iccom_dev, channel):
+    file = "/sys/devices/platform/%s/channels_ctl" % (iccom_dev)
+    command = "c%d" % (channel)
+    write_sysfs_file(file, command)
 
-def delete_channel(iccom_device, channel):
-    command = "echo d{} > /sys/devices/platform/{}/channels_ctl".format(channel, iccom_device)
-    execute_command(command)
+def delete_channel(iccom_dev, channel):
+    file = "/sys/devices/platform/%s/channels_ctl" % (iccom_dev)
+    command = "d%d" % (channel)
+    write_sysfs_file(file, command)
 
 # Writes message to the given iccom channel
-# @iccom_device {string} id of the iccom device
+# @iccom_dev {string} id of the iccom device
 # @channel {number} the destination channel id
-def iccom_write(iccom_device, channel, message):
-    command = "echo -n %s > /sys/devices/platform/%s/channels/%d" % (message, iccom_device, channel)
-    execute_command(command)
+def iccom_write(iccom_dev, channel, message):
+    file = "/sys/devices/platform/%s/channels/%d" % (iccom_dev, channel)
+    command = message
+    write_sysfs_file(file, command)
 
-def iccom_read(iccom_device, channel):
-    command = "cat /sys/devices/platform/%s/channels/%d" % (iccom_device, channel)
-    return execute_command_with_result(command)
+def iccom_read(iccom_dev, channel):
+    file = "/sys/devices/platform/%s/channels/%d" % (iccom_dev, channel)
+    output, errorCode = read_sysfs_file(file)
+    return output, errorCode
 
 # @data bytearray to write to wire
 def write_to_wire(transport_dev, data):
     print("iccom_test: simulated wire data: %s" % (data.hex(),))
-    command = "echo %s > /sys/devices/platform/%s/W" % (data.hex(), transport_dev)
-    execute_command(command)
+    file = "/sys/devices/platform/%s/W" % (transport_dev)
+    command = data.hex()
+    write_sysfs_file(file, command)
 
 # Does the full duplex exfer on wire
 # @transport_dev the transport to work with
@@ -68,7 +107,7 @@ def wire_xfer(transport_dev, send_data):
 def check_wire_xfer(transport_dev, send_data, expected_rcv_data, log_msg=""):
     rcv_data = wire_xfer(transport_dev, send_data)
     if (rcv_data != expected_rcv_data):
-        raise RuntimeError("the unexpected data on wire%s!\n"
+        raise RuntimeError("Unexpected data on wire%s!\n"
                            "    %s (expected)\n"
                            "    %s (received)\n"
                            % (" (" + log_msg + ")" if len(log_msg) else ""
@@ -93,34 +132,46 @@ def check_wire_xfer_ack(transport_dev, log_msg=""):
 #   the channel
 #
 # Throws an exception if the read data doesn't match expected
-def check_ch_data(iccom_device, channel, expected_ch_data):
+def check_ch_data(iccom_device, channel, expected_ch_data, expected_error):
     # time is a bad companion, but still we need some time to allow the
     # kernel internals to work all out with 100% guarantee, to allow
     # test stability
     sleep(0.3)
-
-    ch_data = iccom_read(iccom_device, channel)
-    if (ch_data != expected_ch_data):
-        raise RuntimeError("the unexpected data on channel!\n"
-                           "    %s (expected)\n"
-                           "    %s (received)\n"
-                           % (expected_ch_data, ch_data))
-
+    output, errorCode = iccom_read(iccom_device, channel)
+    if(expected_error != None):
+        if (errorCode != expected_error):
+            raise RuntimeError("Unexpected error mismatch in channel!\n"
+                               "    %s (expected)\n"
+                               "    %s (received)\n"
+                               % (expected_error, errorCode))
+    else:
+        if (errorCode != None):
+            raise RuntimeError("Unexpected error in channel!\n"
+                               "    %s (error received)\n"
+                               % (errorCode))
+        elif (output != expected_ch_data):
+            raise RuntimeError("Unexpected data mismatch in channel!\n"
+                               "    %s (expected)\n"
+                               "    %s (received)\n"
+                               % (expected_ch_data, output))
 
 # RETURNS: the bytarray of wire data sent by ICCom to the wire
 def read_from_wire(transport_dev):
-    command = "cat /sys/devices/platform/%s/R" % (transport_dev,)
-    result = bytearray.fromhex(execute_command_with_result(command))
+    file = "/sys/devices/platform/%s/R" % (transport_dev)
+    output, errorCode = read_sysfs_file(file)
+    result = bytearray.fromhex(output)
     print("iccom_test: received wire data: %s" % (result.hex(),))
     return result
 
 def create_transport_device_RW_files(transport_dev):
-    command = "echo 1 > /sys/devices/platform/{}/showRW_ctl".format(transport_dev)
-    execute_command(command)
+    file = "/sys/devices/platform/%s/showRW_ctl" % (transport_dev)
+    command = "1"
+    write_sysfs_file(file, command)
 
 def delete_transport_device_RW_files(transport_dev):
-    command = "echo 0 > /sys/devices/platform/{}/showRW_ctl".format(transport_dev)
-    execute_command(command)
+    file = "/sys/devices/platform/%s/showRW_ctl" % (transport_dev)
+    command = "0"
+    write_sysfs_file(file, command)
 
 # Provides package on the basis of the package payload
 # NOTE: by package payload is meant
@@ -215,7 +266,7 @@ def iccom_test(test_sequence, params):
             test_descr = test_info["test_description"]
 
             print("======== TEST: %s ========" % (test_id,))
-            
+
             test_sequence(params)
 
             print("%s: PASS" % (test_id,))
@@ -344,7 +395,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(
         check_wire_xfer_ack(transport_dev, "second ack frame")
 
         # Check channel data
-        check_ch_data(iccom_device, 1, "I am Luis")
+        check_ch_data(iccom_device, 1, "I am Luis", None)
 
 
 def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
@@ -377,7 +428,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
         check_wire_xfer_ack(transport_dev, "second ack frame")
 
         # Check that there is no channel data
-        check_ch_data(iccom_device, 1, "")
+        check_ch_data(iccom_device, 1, "", errno.EIO)
 
 def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_payload_size(
                 params, get_test_info=False):
@@ -416,7 +467,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
                         , "expected nack on wire frame")
 
         # Check that there is no channel data
-        check_ch_data(iccom_device, 1, "")
+        check_ch_data(iccom_device, 1, "", errno.EIO)
 
 def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
                 params, get_test_info=False):
@@ -462,15 +513,12 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
         check_wire_xfer_ack(transport_dev, "final ack")
 
         # Check that there is no channel data
-        check_ch_data(iccom_device, 1000, "")
+        check_ch_data(iccom_device, 1000, "", errno.EIO)
 
 if __name__ == '__main__':
 
-        #print("Mounting sys ..")
-        #execute_command("mount sysfs /sys -t sysfs")
-
         print("Inserting iccom.ko ..")
-        execute_command("insmod /modules/iccom.ko")
+        execute_shell_command("insmod /modules/iccom.ko")
 
         # iccom py start
 
@@ -487,22 +535,25 @@ if __name__ == '__main__':
         iccom_test_transport_device.append("iccom_test_transport.2")
         iccom_test_transport_device.append("iccom_test_transport.3")
 
-        ## Create iccom device instances
-        for x in iccom_device:
+        try:
+            ## Create iccom device instances
+            for x in iccom_device:
                 create_iccom_device()
 
-        # Create iccom device instances
-        for x in iccom_test_transport_device:
+            # Create iccom device instances
+            for x in iccom_test_transport_device:
                 create_iccom_test_transport_device()
-
-        # Link tranport device to iccom
-        link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[0], iccom_device[0])
-        link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[1], iccom_device[1])
-        link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[2], iccom_device[2])
-        link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[3], iccom_device[3])
+            
+            # Link tranport device to iccom
+            link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[0], iccom_device[0])
+            link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[1], iccom_device[1])
+            link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[2], iccom_device[2])
+            link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[3], iccom_device[3])
+        except Exception as e:
+            print("[Aborting!] Setup ICCom Tests failed!")
+            os._exit(os.EX_IOERR)
 
         # Test #0
-        
         iccom_test(iccom_tests_sanity_check, {})
 
         # Test #1
@@ -527,4 +578,4 @@ if __name__ == '__main__':
 
         ## iccom py end
         print("Removing iccom.ko ..")
-        execute_command("rmmod iccom.ko")
+        execute_shell_command("rmmod iccom.ko")
