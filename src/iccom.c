@@ -552,6 +552,18 @@ struct xfer_device_data {
 	bool finishing;
 };
 
+// Device list entry definition used to represent the list of devices
+// from a specific driver which will hold all devices for iccom or even
+// for iccom_test_transport. This shall be used to unregister the devices
+// before module is removed safely
+//
+// @dev device object from driver
+// @list list head pointing to the next device entry
+struct device_list{
+        struct device *dev;
+        struct list_head list;
+};
+
 // TODO: probably not needed
 // (probably needed only for xfer)
 //
@@ -4887,6 +4899,88 @@ EXPORT_SYMBOL(iccom_init_binded);
 EXPORT_SYMBOL(iccom_close_binded);
 EXPORT_SYMBOL(iccom_is_running);
 
+// Adds a generic device into a list to be further used to
+// delete those devices using the platform_device_unregister
+//
+// @dev {valid ptr} device to be stored
+// @data {valid ptr} list head necessary for the list
+//
+// RETURNS:
+//      0: ok
+//     <0: errors
+int iccom_sysfs_add_device_to_list(struct device *dev, void* data)
+{
+	if(IS_ERR_OR_NULL(dev)) {
+		iccom_err("device is null");
+		return -EFAULT;
+	}
+
+	if(IS_ERR_OR_NULL(data)) {
+		iccom_err("data is null");
+		return -EFAULT;
+	}
+
+	struct list_head *devices_list_head = (struct list_head *)data;
+
+	if(IS_ERR_OR_NULL(devices_list_head)) {
+		iccom_err("List for device storing is invalid.");
+		return -EINVAL;
+	}
+	
+	struct device_list *device_list_entry = 
+				kzalloc(sizeof(struct device_list),GFP_KERNEL);
+	if(IS_ERR_OR_NULL(device_list_entry)) {
+		iccom_err("No available memory to create \
+				a device_list entry.");
+		return -ENOMEM;
+	}
+
+	device_list_entry->dev = dev;
+	list_add(&device_list_entry->list, devices_list_head);
+
+	return 0;
+}
+
+// Destroys all the platform devices associated with a platform
+// driver by looping them first and then by calling
+// platform_device_unregister for each of them
+//
+// @driver {valid ptr} driver which holds the devices
+void iccom_sysfs_driver_unregister_devices(struct device_driver *driver)
+{
+	struct list_head driver_devices_list_head;
+	struct device_list *driver_device_list_entry, *tmp;
+	int ret;
+
+	if(IS_ERR_OR_NULL(driver)) {
+		iccom_err("Driver is null");
+		return;
+	}
+
+	INIT_LIST_HEAD(&driver_devices_list_head);
+
+	ret = driver_for_each_device(driver, NULL, 
+				&driver_devices_list_head,
+				 &iccom_sysfs_add_device_to_list);
+	if(ret < 0) {
+		iccom_err("Failed to unregister devices from driver %s.", driver->name);
+		list_for_each_entry_safe(driver_device_list_entry, tmp,
+				&driver_devices_list_head, list) {
+		list_del(&driver_device_list_entry->list);
+		kfree(driver_device_list_entry);
+		}
+		return;
+	} 
+	
+	list_for_each_entry_safe(driver_device_list_entry, tmp,
+				&driver_devices_list_head, list) {
+		platform_device_unregister(
+			to_platform_device(driver_device_list_entry->dev));
+		list_del(&driver_device_list_entry->list);
+		kfree(driver_device_list_entry);
+	}
+}
+
 // Initializes the sysfs channels list. This list
 // shall have all channels (holding the iccom messages
 // received from transport) for a particular iccom instance
@@ -5234,13 +5328,79 @@ static ssize_t create_iccom_store(
 
 static CLASS_ATTR_WO(create_iccom);
 
+// Sysfs class method for deleting iccom instances 
+// trough the usage of sysfs internal mechanisms
+//
+// @class {valid ptr} iccom class
+// @attr {valid ptr} device attribute properties
+// @buf {valid ptr} buffer to read input from user space
+// @count {number} size of buffer from user space
+//
+// RETURNS:
+//  count: ok
+//    < 0: errors
+static ssize_t delete_iccom_store(
+		struct class *class, struct class_attribute *attr,
+		const char *buf, size_t count)
+{
+	if (count >= PAGE_SIZE) {
+		iccom_warning("Sysfs data can not fit the 0-terminator.");
+		return -EINVAL;
+	}
+
+	// Sysfs store procedure has data from userspace with length equal
+	// to count. The next byte after the data sent (count + 1) will always
+	// be a 0-terminator char. This is the default behavior of sysfs.
+	size_t total_count = count + 1;
+	char *device_name = (char *) kzalloc(total_count, GFP_KERNEL);
+	
+	if (IS_ERR_OR_NULL(device_name)) {
+		return -ENOMEM;
+	}
+	
+	memcpy(device_name, buf, total_count);
+
+	// NOTE: count is a length without the last 0-terminator char
+	if (device_name[count] != 0) {
+		iccom_warning("NON-null-terminated string is provided by sysfs.");
+		goto clean_up_device_name_buffer_memory;
+	}
+
+	(void)iccom_test_sysfs_trim_buffer(device_name, count);
+
+	struct device *iccom_device = 
+		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
+
+	kfree(device_name);
+
+	if (IS_ERR_OR_NULL(iccom_device)) {
+		iccom_err("Iccom device is null.");
+		return -EFAULT;
+	}
+
+	platform_device_unregister(to_platform_device(iccom_device));
+
+	return count;
+
+clean_up_device_name_buffer_memory:
+	kfree(device_name);
+	return -EFAULT;
+}
+
+static CLASS_ATTR_WO(delete_iccom);
+
 // List of all ICCom class attributes
 //
-// @class_attr_version the version of ICCom file
-// @class_attr_create_device the create device file of ICCom
+// @class_attr_version sysfs file for checking
+//                     the version of ICCom
+// @class_attr_create_iccom sysfs file for creating
+//                              iccom devices
+// @class_attr_delete_iccom sysfs file for deleting
+//                              iccom devices
 static struct attribute *iccom_class_attrs[] = {
 	&class_attr_version.attr,
 	&class_attr_create_iccom.attr,
+	&class_attr_delete_iccom.attr,
 	NULL
 };
 
@@ -6522,11 +6682,76 @@ static ssize_t create_transport_store(
 
 static CLASS_ATTR_WO(create_transport);
 
+// Sysfs class method for deleting iccom_test_transport instances
+// trough the usage of sysfs internal mechanisms
+//
+// @class {valid ptr} iccom class
+// @attr {valid ptr} device attribute properties
+// @buf {valid ptr} buffer to read input from user space
+// @count {number} size of buffer from user space
+//
+// RETURNS:
+//  count: ok
+//    < 0: errors
+static ssize_t delete_transport_store(
+		struct class *class, struct class_attribute *attr,
+		const char *buf, size_t count)
+{
+	if (count >= PAGE_SIZE) {
+		iccom_warning("Sysfs data can not fit the 0-terminator.");
+		return -EINVAL;
+	}
+
+	// Sysfs store procedure has data from userspace with length equal
+	// to count. The next byte after the data sent (count + 1) will always
+	// be a 0-terminator char. This is the default behavior of sysfs.
+	size_t total_count = count + 1;
+	char *device_name = (char *) kzalloc(total_count, GFP_KERNEL);
+	
+	if (IS_ERR_OR_NULL(device_name)) {
+		return -ENOMEM;
+	}
+	
+	memcpy(device_name, buf, total_count);
+
+	// NOTE: count is a length without the last 0-terminator char
+	if (device_name[count] != 0) {
+		iccom_warning("NON-null-terminated string is provided by sysfs.");
+		goto clean_up_device_name_buffer_memory;
+	}
+
+	(void)iccom_test_sysfs_trim_buffer(device_name, count);
+
+	struct device *iccom_test_transport_device = 
+		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
+
+	kfree(device_name);
+
+	if (IS_ERR_OR_NULL(iccom_test_transport_device)) {
+		iccom_err("Iccom Test Transport device is null.");
+		return -EFAULT;
+	}
+
+	platform_device_unregister(to_platform_device(iccom_test_transport_device));
+
+	return count;
+
+clean_up_device_name_buffer_memory:
+	kfree(device_name);
+	return -EFAULT;
+}
+
+static CLASS_ATTR_WO(delete_transport);
+
 // List of all Transport class attributes
 //
-// @class_attr_create_transport the create device file of Transport
+// @class_attr_create_transport sysfs file for creating
+//                              iccom_test_transport devices
+// @class_attr_delete_transport sysfs file for deleting
+//                              iccom_test_transport devices
 static struct attribute *iccom_test_transport_class_attrs[] = {
 	&class_attr_create_transport.attr,
+	&class_attr_delete_transport.attr,	
 	NULL
 };
 
@@ -6761,9 +6986,12 @@ static void __exit iccom_module_exit(void)
 	ida_destroy(&iccom_test_transport_dev_id);
 
 	iccom_test_sysfs_iccom_class_unregister();
-	platform_driver_unregister(&iccom_driver);
-
 	iccom_test_sysfs_transport_class_unregister();
+
+	iccom_sysfs_driver_unregister_devices(&iccom_driver.driver);
+	iccom_sysfs_driver_unregister_devices(&iccom_test_transport_driver.driver);
+
+	platform_driver_unregister(&iccom_driver);
 	platform_driver_unregister(&iccom_test_transport_driver);
 
 	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "module unloaded");

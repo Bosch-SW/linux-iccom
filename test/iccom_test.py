@@ -33,22 +33,31 @@ def write_sysfs_file(file_to_write, content_to_write):
             file.write(content_to_write)
     except OSError as e:
         # Catch the error if any
-        error = e.errno
-
         if (error != None):
             raise RuntimeError("Unexpected error trying to write\n"
                                "    (data to write:) %s \n"
                                "    (file) %s \n"
-                               % (content_to_write, file_to_write))
+                               "    (error) %s \n"
+                               % (content_to_write, file_to_write, str(e)))
 
 def create_iccom_device():
     file = "/sys/class/iccom/create_iccom"
     command = " "
     write_sysfs_file(file, command)
 
+def delete_iccom_device(iccom_dev):
+    file = "/sys/class/iccom/delete_iccom"
+    command = "%s" % (iccom_dev)
+    write_sysfs_file(file, command)
+
 def create_iccom_test_transport_device():
     file = "/sys/class/iccom_test_transport/create_transport"
     command = " "
+    write_sysfs_file(file, command)
+
+def delete_iccom_test_transport_device(transport_dev):
+    file = "/sys/class/iccom_test_transport/delete_transport"
+    command = "%s" % (transport_dev)
     write_sysfs_file(file, command)
 
 def link_iccom_test_transport_device_to_iccom_device(transport_dev, iccom_dev):
@@ -515,6 +524,41 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
         # Check that there is no channel data
         check_ch_data(iccom_device, 1000, "", errno.EIO)
 
+def iccom_check_devices_deletion(
+                params, get_test_info=False):
+
+        if (get_test_info):
+            return { "test_description": ("iccom -> check sucessfull removal"
+                                          " of all devices")
+                     , "test_id": "iccom_final_test.python" }
+
+        device_name = params["device_name"]
+
+        ###### Test sequence ######
+
+        CheckIccomDevicesExistance(device_name)
+
+def iccom_test_transport_check_devices_deletion(
+                params, get_test_info=False):
+
+        if (get_test_info):
+            return { "test_description": ("iccom_test_transport -> check sucessfull removal"
+                                          " of all devices")
+                     , "test_id": "iccom_test_transport_final_test.python" }
+
+        device_name = params["device_name"]
+
+        ###### Test sequence ######
+
+        CheckIccomDevicesExistance(device_name)
+
+def CheckIccomDevicesExistance(device_regex):
+             # Check whether all iccom devices got deleted
+        command = "find /sys/devices/platform/ -iname *%s* 2> /dev/null | wc -l | awk '{printf $0}'" % (device_regex)
+        devices_num = subprocess.check_output(command, shell=True, text=True)
+        if (str(devices_num) != str(0)):
+           raise RuntimeError("Some iccom devices were not deleted: " + str(devices_num))
+
 if __name__ == '__main__':
 
         print("Inserting iccom.ko ..")
@@ -536,7 +580,7 @@ if __name__ == '__main__':
         iccom_test_transport_device.append("iccom_test_transport.3")
 
         try:
-            ## Create iccom device instances
+           # Create iccom device instances
             for x in iccom_device:
                 create_iccom_device()
 
@@ -551,6 +595,7 @@ if __name__ == '__main__':
             link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[3], iccom_device[3])
         except Exception as e:
             print("[Aborting!] Setup ICCom Tests failed!")
+            print(str(e))
             os._exit(os.EX_IOERR)
 
         # Test #0
@@ -576,6 +621,14 @@ if __name__ == '__main__':
                    , {"transport_dev": iccom_test_transport_device[3]
                       , "iccom_device ": iccom_device[3]})
 
-        ## iccom py end
+       # iccom py end
         print("Removing iccom.ko ..")
         execute_shell_command("rmmod iccom.ko")
+
+        # Final Test #1
+        iccom_test(iccom_check_devices_deletion
+                   , {"device_name": "iccom."})
+
+        # Final Test #2
+        iccom_test(iccom_test_transport_check_devices_deletion
+                   , {"device_name": "iccom_test_transport."})
