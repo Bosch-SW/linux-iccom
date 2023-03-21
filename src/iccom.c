@@ -496,8 +496,7 @@ struct iccom_test_transport_dev_private {
 //
 // @full_duplex_sym_iface {ptr valid} full duplex interface
 // @p {ptr valid} iccom test transport private data
-struct iccom_test_transport_dev
-{
+struct iccom_test_transport_dev {
 	struct full_duplex_sym_iface * duplex_iface;
 	struct iccom_test_transport_dev_private *p;
 };
@@ -559,9 +558,9 @@ struct xfer_device_data {
 //
 // @dev device object from driver
 // @list list head pointing to the next device entry
-struct device_list{
-        struct device *dev;
-        struct list_head list;
+struct device_list {
+	struct device *dev;
+	struct list_head list;
 };
 
 // TODO: probably not needed
@@ -4899,6 +4898,62 @@ EXPORT_SYMBOL(iccom_init_binded);
 EXPORT_SYMBOL(iccom_close_binded);
 EXPORT_SYMBOL(iccom_is_running);
 
+// Adds a link dependency so that kernel knows
+// iccom device is dependent on the transport
+// and therefore order matters on device removal
+//
+// @iccom_device {valid ptr} device that needs the iccom_test_transport_device
+// @iccom_test_transport_device {valid ptr} device which will be linked to iccom_device
+//
+// RETURNS:
+//      0: ok
+//     <0: errors
+ssize_t iccom_add_link_dependency(
+		struct device *iccom_device,
+		struct device *iccom_test_transport_device)
+{
+	if (IS_ERR_OR_NULL(iccom_device)) {
+		iccom_err("Iccom device is null.");
+		return -EFAULT;
+	}
+	if (IS_ERR_OR_NULL(iccom_test_transport_device)) {
+		iccom_err("Iccom Test Transport device is null.");
+		return -EFAULT;
+	}
+	
+	struct device_link *link_downwards = device_link_add(
+						iccom_device, iccom_test_transport_device,
+						DL_FLAG_AUTOREMOVE_CONSUMER);
+	if(IS_ERR_OR_NULL(link_downwards)) {
+		iccom_err("Iccom Test Transport device link failed.");
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+// Check wheter any iccom device is link dependent
+// on the iccom_test_transport
+//
+// @iccom_test_transport_device {valid ptr} device to be checked
+//
+// RETURNS:
+//      0: ok
+//   != 0: nok
+ssize_t iccom_check_link_dependency(struct device *iccom_test_transport_device)
+{
+	if (IS_ERR_OR_NULL(iccom_test_transport_device)) {
+		iccom_err("Iccom Test Transport device is null.");
+		return -EFAULT;
+	}
+
+	if(list_empty(&iccom_test_transport_device->links.suppliers)) {
+		iccom_err("There is an iccom device that depends on this iccom_test_transport.");
+		return -EINVAL;
+	}
+	return 0;
+}
+
 // Adds a generic device into a list to be further used to
 // delete those devices using the platform_device_unregister
 //
@@ -4986,19 +5041,24 @@ void iccom_sysfs_driver_unregister_devices(struct device_driver *driver)
 // received from transport) for a particular iccom instance
 //
 // @iccom {valid prt} iccom_dev pointer
-void __iccom_test_sysfs_initialize_ch_list(struct iccom_dev *iccom)
+//
+// RETURNS:
+//      0: ok
+//     <0: errors
+ssize_t iccom_test_sysfs_initialize_ch_list(struct iccom_dev *iccom)
 {
 	if (IS_ERR_OR_NULL(iccom)) {
 		iccom_err("Iccom is null");
-		return;
+		return -EFAULT;
 	}
 
 	if (IS_ERR_OR_NULL(iccom->p)) {
 		iccom_err("Iccom private data is null");
-		return;
+		return -EFAULT;
 	}
 
 	INIT_LIST_HEAD(&iccom->p->sysfs_test_ch_head);
+	return 0;
 }
 
 // Initializes the sysfs channel msgs list which shall
@@ -5006,9 +5066,13 @@ void __iccom_test_sysfs_initialize_ch_list(struct iccom_dev *iccom)
 // sysfs channel
 //
 // @ch_entry {valid prt} sysfs channel entry
-void __iccom_test_sysfs_init_ch_msgs_list(
+void iccom_test_sysfs_init_ch_msgs_list(
 		struct iccom_test_sysfs_channel * ch_entry)
 {
+	if (IS_ERR_OR_NULL(ch_entry)) {
+		iccom_err("Iccom channel entry is null");
+		return;
+	}
 	INIT_LIST_HEAD(&ch_entry->sysfs_ch_msgs_head);
 }
 
@@ -5092,6 +5156,10 @@ void iccom_test_sysfs_ch_del(struct iccom_dev *iccom)
 // is stored
 // @buf__out {ptr valid} pointer where data shall be written to
 // @data_size {valid prt} size of the output data that was written
+//
+// RETURNS:
+//      0: ok
+//     <0: errors
 ssize_t iccom_test_sysfs_ch_pop_msg(
 		struct iccom_test_sysfs_channel *ch_entry, char * buf__out,
 		size_t buf_size)
@@ -5128,6 +5196,10 @@ ssize_t iccom_test_sysfs_ch_pop_msg(
 // @ch_id {number} ICCom logical channel ID
 // @buf__out {valid prt} where the data shall be copied to
 // @data_size {valid prt} size of data copied
+//
+// RETURNS:
+//      0: ok
+//     <0: errors
 ssize_t iccom_test_sysfs_ch_pop_msg_by_ch_id(
 		struct iccom_dev *iccom, unsigned int ch_id,
 		char * buf__out, size_t buf_size)
@@ -5203,7 +5275,7 @@ ssize_t iccom_test_sysfs_ch_add_by_iccom(
 
 	iccom_ch_entry->ch_id = ch_id;
 	iccom_ch_entry->number_of_msgs = 0;
-	__iccom_test_sysfs_init_ch_msgs_list(iccom_ch_entry);
+	iccom_test_sysfs_init_ch_msgs_list(iccom_ch_entry);
 	mutex_lock(&iccom->p->sysfs_test_ch_lock);
 	list_add(&iccom_ch_entry->list, &iccom->p->sysfs_test_ch_head );
 	mutex_unlock(&iccom->p->sysfs_test_ch_lock);
@@ -5531,13 +5603,25 @@ static ssize_t transport_store(
 		return -EINVAL;
 	}
 
-	__iccom_test_sysfs_initialize_ch_list(iccom);
+	ssize_t ch_initialization = iccom_test_sysfs_initialize_ch_list(iccom);
+
+	if (ch_initialization != 0) {
+		iccom_err("Sysfs Channel List initialization failed");
+		return ch_initialization;
+	}
 
 	if (IS_ERR_OR_NULL(iccom->p)) {
 		iccom_err("Iccom Private data is null");
 		return -EFAULT;
 	}
-		
+
+	ssize_t link_ret = iccom_add_link_dependency(dev, iccom_test_transport_device);
+
+	if(link_ret != 0) {
+		iccom_err("Unable to create link for transport device %s",
+							dev_name(iccom_test_transport_device));
+	}
+
 	// Create sysfs channels root directory to hold sysfs channels
 	iccom->p->channels_root = kobject_create_and_add(
 						ICCOM_TEST_SYSFS_CHANNEL_ROOT,
@@ -6730,6 +6814,11 @@ static ssize_t delete_transport_store(
 	if (IS_ERR_OR_NULL(iccom_test_transport_device)) {
 		iccom_err("Iccom Test Transport device is null.");
 		return -EFAULT;
+	}
+
+	ssize_t link_dependency = iccom_check_link_dependency(iccom_test_transport_device);
+	if(link_dependency != 0) {
+		return link_dependency;
 	}
 
 	platform_device_unregister(to_platform_device(iccom_test_transport_device));
