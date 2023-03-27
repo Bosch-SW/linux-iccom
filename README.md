@@ -408,6 +408,100 @@ Enabling the FDDM driver and attaching it to the ICCom will allow to test
 the ICCom drivers in stack and under transport channel of various
 levels of noise.
 
+# Qemu Sysfs testing
+
+ICCom comes with a sysfs ability to create/destroy ICCom and
+ICCom test transport devices, link those devices, simulate from
+userspace data to be sent from ICCom to ICCom test device and vice
+versa and sniff the data that flows to physical channels in sysfs
+channels. There are predefined python tests that use these sysfs
+functionalities and check the ICCom behavior as a regression test.
+
+Sysfs functionalities include:
+* dynamically creating successive iccom and iccom test transport devices;
+* dynamically deleting successive iccom and iccom test transport devices;
+* link iccom test transport devices to iccom ones;
+* create, use and destroy communication channels inside the iccom device;
+* create, use and destroy transport communication files in iccom test transport (R & W files):
+
+![ICCom Sysfs Structure](docs/assets/iccom_sysfs_structure.png)
+
+Create iccom devices
+```
+# Run the command multiple times to create successive iccom devices
+
+# /sys/devices/platform/iccom.0
+sudo sh -c "echo > /sys/class/iccom/create_iccom"
+
+# /sys/devices/platform/iccom.1
+sudo sh -c "echo > /sys/class/iccom/create_iccom"
+```
+
+Create iccom test transport devices
+```
+# Run the command multiple times to create successive iccom test transport devices
+
+# /sys/devices/platform/iccom_test_transport.0
+sudo sh -c "echo > /sys/class/iccom/create_transport"
+
+# /sys/devices/platform/iccom_test_transport.1
+sudo sh -c "echo > /sys/class/iccom/create_transport"
+Link iccom test transport to iccom devices
+# link iccom_test_transport.0 to iccom.0
+sudo sh -c "echo iccom_test_transport.0 > /sys/devices/platform/iccom.0/transport"
+```
+
+Create iccom channel
+```
+# Run the command as "echo cX (...)" (X is the channel's id number) to create an iccom channel with id = X
+
+# create channel 1 for iccom.0
+sudo sh -c "echo c1 > /sys/devices/platform/iccom.0/channels_ctl"
+
+# create channel 2 for iccom.0
+sudo sh -c "echo c2 > /sys/devices/platform/iccom.0/channels_ctl"
+```
+
+Destroy iccom channel
+```
+# Run the command as "echo dX (...)" (X is the channel's id number) to destroy the existing iccom channel with id = X
+
+# delete channel 1 for iccom.0
+sudo sh -c "echo d1 > /sys/devices/platform/iccom.0/channels_ctl"
+
+# delete channel 2 for iccom.0
+sudo sh -c "echo d2 > /sys/devices/platform/iccom.0/channels_ctl" 
+```
+
+Send data from iccom to iccom test transport device
+```
+# data shall be in the format of string
+# channel 1 and iccom_test_transport.0
+sudo sh -c "echo Hello from user space side! > /sys/devices/platform/iccom_test_transport.0/channels/1"
+```
+
+Create/delete R & W files for transport
+```
+# Create R and W files in iccom_test_transport.0/ 
+sudo sh -c "echo 1 > /sys/devices/platform/iccom_test_transport.0/showRW_ctl"
+
+# Destroy R and W files in iccom_test_transport.0/
+sudo sh -c "echo 0 > /sys/devices/platform/iccom_test_transport.0/showRW_ctl"
+```
+
+Send data from iccom test transport to iccom device
+```
+# send data to iccom_test_transport.0 and it shall be in the format aabbcc
+sudo sh -c "echo aabbcc > /sys/devices/platform/iccom_test_transport.0/W"
+```
+
+Read data from iccom to iccom_test_transport device
+```
+# read data sent from iccom.? to iccom_test_transport.0 in the format aabbcc
+
+cat /sys/devices/platform/iccom_test_transport.0/R
+```
+
 # Current state
 
 The driver stack is working, and allows one to run the communication
