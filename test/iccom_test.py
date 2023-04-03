@@ -667,7 +667,10 @@ if __name__ == '__main__':
         number_of_devices = 6
         print("Inserting iccom.ko ..")
         execute_shell_command("insmod /modules/iccom.ko")
-        
+
+        print("Inserting fd_test_transport.ko ..")
+        execute_shell_command("insmod /modules/fd_test_transport.ko")
+
         output, errorCode = iccom_version()
         print("ICCom revision: " + output)
 
@@ -735,6 +738,8 @@ if __name__ == '__main__':
                     , {"device_name": "iccom_test_transport."
                     , "number_of_devices": number_of_devices})
 
-       # iccom py end
+        # iccom py end
         print("Removing iccom.ko ..")
         execute_shell_command("rmmod iccom.ko")
+        print("Removing fd_test_transport.ko ..")
+        execute_shell_command("rmmod fd_test_transport.ko")

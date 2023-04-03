@@ -24,6 +24,7 @@ endif
 ccflags-y += -DICCOM_VERSION='"${CONFIG_ICCOM_VERSION}"'
 
 obj-$(CONFIG_BOSCH_ICCOM) += src/iccom.o
+obj-$(CONFIG_BOSCH_FD_TEST_TRANSPORT) += src/fd_test_transport.o
 
 ifeq ($(CONFIG_BOSCH_ICCOM_TEST_MODULE), y)
     obj-m += src/iccom_test.o
