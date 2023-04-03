@@ -80,6 +80,7 @@
 // The maximum client message size (client data size in bytes per message)
 #define ICCOM_SOCKET_MAX_MESSAGE_SIZE_BYTES 4096
 #define NETLINK_ICCOM 22
+#define PROTOCOL_FAMILY_RESET_VALUE -1
 
 #define ICCOM_SOCKETS_CLOSE_POLL_PERIOD_JIFFIES msecs_to_jiffies(200)
 
@@ -147,11 +148,25 @@
                 error_action;                                            \
         }
 
+#define ICCOM_SK_CHECK_SYSFS_CLASS_PARAMS(msg, error_action)		\
+	if (IS_ERR_OR_NULL(class) || IS_ERR_OR_NULL(attr)		\
+		|| IS_ERR_OR_NULL(buf)) {				\
+		iccom_socket_err("%s: parameters are invalid; "msg"\n"	\
+				, __func__);				\
+		error_action;						\
+	}								\
+
+#define ICCOM_SK_CHECK_SYSFS_DEVICE_PARAMS(msg, error_action)		\
+	if (IS_ERR_OR_NULL(dev) || IS_ERR_OR_NULL(attr)		\
+		|| IS_ERR_OR_NULL(buf)) {				\
+		iccom_socket_err("%s: parameters are invalid; "msg"\n"	\
+				, __func__);				\
+		error_action;						\
+	}								\
+
 #define fitsin(TYPE, FIELD, SIZE)                                        \
         (offsetof(TYPE, FIELD) + sizeof(((TYPE*)(NULL))->FIELD) <= (SIZE))
 
-// ID Allocator
-struct ida iccom_socket_if_device_id;
 /* -------------------------- STRUCTS -----------------------------------*/
 
 
@@ -184,6 +199,9 @@ struct iccom_sk_loopback_mapping_rule {
 //
 // @socket the socket we are working with
 // @protocol_family_id id for the socket protocol family
+//			value >= 22 is a netlink valid value
+//			value < 22 is a netlink invalid value
+//			value == -1 is an initialization value
 // @pump_task the ptr to thread which pumpts messages to ICCom device
 // @iccom the ICCom device to work with
 // @initialized completed as everything is ready to be run after
@@ -208,7 +226,7 @@ struct iccom_sockets_device {
         int protocol_family_id;
         struct task_struct *pump_task;
 
-        struct iccom_dev iccom;
+        struct iccom_dev *iccom;
 
         struct completion initialized;
         bool exiting;
@@ -220,21 +238,14 @@ struct iccom_sockets_device {
         struct iccom_sk_loopback_mapping_rule *lback_map_rule;
 };
 
-// Device list entry definition used to represent the list of devices
-// from a specific driver
-//
-// @dev device object from driver
-// @list list head pointing to the next device entry
-struct device_list{
-	struct device *dev;
-	struct list_head list;
-};
 /* -------------------------- EXTERN VARS -------------------------------*/
 
 /* -------------------------- GLOBAL VARS -------------------------------*/
 
 // Singleton device for now.
 struct iccom_sockets_device __iccom_sockets_dev;
+// ID Allocator
+struct ida iccom_skif_device_id;
 
 /* --------------------- FORWARD DECLARATIONS ---------------------------*/
 
@@ -418,7 +429,7 @@ static int __iccom_socket_dispatch_msg_down(
                                 , NLMSG_PAYLOAD(nl_header, 0));
         }
 
-        return iccom_post_message(&iccom_sk->iccom
+        return iccom_post_message(iccom_sk->iccom
                         , NLMSG_DATA(nl_header)
                         , NLMSG_PAYLOAD(nl_header, 0)
                         , channel_nr
@@ -444,7 +455,7 @@ static int __iccom_socket_dispatch_msg_up(
 {
         if (data_size_bytes > ICCOM_SOCKET_MAX_MESSAGE_SIZE_BYTES) {
                 iccom_socket_err("received message is bigger than max"
-                                 "  allowed: %d > %d bytes; dropping;"
+                                 "  allowed: %lu > %d bytes; dropping;"
                                  , data_size_bytes
                                  , ICCOM_SOCKET_MAX_MESSAGE_SIZE_BYTES);
                 return -ENOMEM;
@@ -539,7 +550,6 @@ static void __iccom_socket_unreg_socket_family(
         iccom_sk->exiting = true;
         netlink_kernel_release(iccom_sk->socket);
         iccom_sk->socket = NULL;
-	iccom_sk->protocol_family_id = -1;
         complete(&iccom_sk->socket_closed);
 }
 
@@ -819,7 +829,7 @@ static int __iccom_sk_loopback_ctl_init(
         return 0;
 }
 
-// Removes the ICcom proc statistics file
+// Closes the proc loopback ctl
 static void __iccom_sk_loopback_ctl_close(
                 struct iccom_sockets_device *iccom_sk)
 {
@@ -847,7 +857,7 @@ static void __iccom_socket_protocol_device_close(
                 struct iccom_sockets_device *iccom_sk)
 {
         if (IS_ERR_OR_NULL(iccom_sk)
-                    || !iccom_is_running(&iccom_sk->iccom)) {
+                    || !iccom_is_running(iccom_sk->iccom)) {
                 return;
         }
         iccom_sk->exiting = true;
@@ -861,7 +871,7 @@ static void __iccom_socket_protocol_device_close(
 static int __iccom_socket_protocol_device_init(
 		struct iccom_sockets_device *iccom_sk)
 {
-	int res = iccom_set_channel_callback(&iccom_sk->iccom
+	int res = iccom_set_channel_callback(iccom_sk->iccom
 			, ICCOM_ANY_CHANNEL_VALUE
 			, &__iccom_socket_msg_rx_callback
 			, (void *)iccom_sk);
@@ -872,32 +882,74 @@ static int __iccom_socket_protocol_device_init(
 	return res;
 }
 
-// closes whole iccom sockets device inclusive all
-// underlying layers
-static int __iccom_socket_device_close(
-                struct iccom_sockets_device *iccom_sk)
+// iccom_skif_reset_data - resets iccom sk if struct data
+//
+// @iccom_sk - iccom sk device to have its data reset
+//
+// RETURNS: void
+static void iccom_skif_reset_data(struct iccom_sockets_device *iccom_sk)
+{
+	if (!IS_ERR_OR_NULL(iccom_sk)) {
+		memset(iccom_sk, 0, sizeof(*iccom_sk));
+		iccom_sk->protocol_family_id = PROTOCOL_FAMILY_RESET_VALUE;
+	}
+}
+
+// iccom_skif_init - initializes the iccom socket device data structure
+//
+// @iccom_sk - iccom sk device to initialize
+//
+// RETURNS:
+//      0: if success
+//      <0: negated error code else
+static int iccom_skif_init(struct iccom_sockets_device *iccom_sk)
 {
         ICCOM_SK_CHECK_DEVICE("", return -ENODEV);
+	
+	iccom_skif_reset_data(iccom_sk);
+        init_completion(&iccom_sk->initialized);
+        init_completion(&iccom_sk->socket_closed);
+        init_completion(&iccom_sk->pump_main_loop_done);
+
+        //__iccom_sk_loopback_ctl_init(iccom_sk);
+
+	complete(&iccom_sk->initialized);
+
+	iccom_socket_info("iccom socket if initialization completed");
+	return 0;
+}
+
+// iccom_skif_close - closes whole iccom sockets device inclusive all
+// 			underlying layers
+//
+// @iccom_sk - iccom sk device to close
+//
+// RETURNS:
+//      0: if success
+//      <0: negated error code else
+static int iccom_skif_close(struct iccom_sockets_device *iccom_sk)
+{
+	ICCOM_SK_CHECK_DEVICE("", return -ENODEV);
 
         // order matters
         __iccom_sk_loopback_ctl_close(iccom_sk);
 //        __iccom_sk_procfs_close(iccom_sk);
         __iccom_socket_unreg_socket_family(iccom_sk);
         __iccom_socket_protocol_device_close(iccom_sk);
+	iccom_skif_reset_data(iccom_sk); //makes sense?
         return 0;
 }
 
-// Initializes the device structure.
+// iccom_skif_run - launches iccom sockets interface layer
+//
+// @iccom_sk - iccom sk device to launch
+//
 // RETURNS:
 //      0: if success
 //      <0: negated error code else
-static int __iccom_socket_device_init(
-                struct iccom_sockets_device *iccom_sk)
+static int iccom_skif_run(struct iccom_sockets_device *iccom_sk)
 {
         ICCOM_SK_CHECK_DEVICE("", return -ENODEV);
-        init_completion(&iccom_sk->initialized);
-        init_completion(&iccom_sk->socket_closed);
-        init_completion(&iccom_sk->pump_main_loop_done);
 
         // order matters
         int res = __iccom_socket_reg_socket_family(iccom_sk);
@@ -920,8 +972,31 @@ static int __iccom_socket_device_init(
         return 0;
 
 failed:
-        __iccom_socket_device_close(iccom_sk);
+        iccom_skif_close(iccom_sk);
         return res;
+}
+
+// iccom_skif_stop - stop iccom sockets interface layer
+//
+// @iccom_sk - iccom sk device to stop
+//
+// RETURNS:
+//      0: if success
+//      <0: negated error code else
+static int iccom_skif_stop(struct iccom_sockets_device *iccom_sk)
+{
+	int ret = 0;
+
+	ret = iccom_remove_channel_callback(iccom_sk->iccom, 
+					ICCOM_ANY_CHANNEL_VALUE);
+	if (ret < 0) {
+		iccom_socket_err("Unable to stop the iccom sk if");
+		return ret;
+	}
+
+	__iccom_socket_protocol_device_close(iccom_sk);
+
+	return 0;
 }
 
 // version_show - retrieves git revision for current implementation
@@ -936,7 +1011,9 @@ failed:
 static ssize_t version_show(struct class *class, struct class_attribute *attr,
 			    char *buf) 
 {
-	return scnprintf(buf, PAGE_SIZE, "version: xyz");
+	ICCOM_SK_CHECK_SYSFS_CLASS_PARAMS("", return -EINVAL);
+
+	return scnprintf(buf, PAGE_SIZE, "version: %s", ICCOM_GIT_REPO_HASH);
 }
 static CLASS_ATTR_RO(version);
 
@@ -952,9 +1029,7 @@ static CLASS_ATTR_RO(version);
 static ssize_t delete_device_store(struct class *class, struct class_attribute *attr,
 						 const char *buf, size_t count)
 {
-	size_t total_count = count + 1;
-	struct device *device_to_delete;
-	char *device_name;
+	ICCOM_SK_CHECK_SYSFS_CLASS_PARAMS("", return -EINVAL);
 
 	if (count >= PAGE_SIZE) {
 		iccom_socket_err("Input data is longer than expected (%lu)", 
@@ -962,25 +1037,32 @@ static ssize_t delete_device_store(struct class *class, struct class_attribute *
 		return -EINVAL;
 	}
 
+	size_t total_count = count + 1;
+	char *device_name;
+
 	device_name = (char *) kzalloc(total_count, GFP_KERNEL);
 
-	if(IS_ERR_OR_NULL(device_name)) {
+	if (IS_ERR_OR_NULL(device_name)) {
 		return -ENOMEM;
 	}
 
 	memcpy(device_name, buf, total_count);
 
-	if(device_name[count] != 0) {
+	if (device_name[count] != 0) {
 		iccom_socket_err("Non-null terminated string. Invalid input.");
+		kfree(device_name);
 		return -EINVAL;
 	}
+
+	struct device *device_to_delete;
 
 	device_to_delete = 
 		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
 	kfree(device_name);
 
-	if(IS_ERR_OR_NULL(device_to_delete)) {
+	if (IS_ERR_OR_NULL(device_to_delete)) {
+		iccom_socket_err("Unable to find provided device.");
 		return -EINVAL;
 	}
 
@@ -1002,23 +1084,24 @@ static CLASS_ATTR_WO(delete_device);
 static ssize_t create_device_store(struct class *class, struct class_attribute *attr,
 				   const char *buf, size_t count)
 {
-	struct platform_device * new_pdev;
+	ICCOM_SK_CHECK_SYSFS_CLASS_PARAMS("", return -EINVAL);
 
-	// Allocate one unused ID
-	int device_id = ida_alloc(&iccom_socket_if_device_id, GFP_KERNEL);
-	if(device_id < 0) {
+	int device_id = ida_alloc(&iccom_skif_device_id, GFP_KERNEL);
+	if (device_id < 0) {
 		iccom_socket_err("Could not allocate a new unused ID");
 		return -EINVAL;
 	}
 
+	struct platform_device * new_pdev;
+
 	new_pdev = platform_device_register_simple("iccom_socket_if", device_id,
 						    NULL, 0);
-	if(IS_ERR_OR_NULL(new_pdev)) {
+	if (IS_ERR_OR_NULL(new_pdev)) {
 		iccom_socket_err("Could not register the device iccom socket.%d",
 				 device_id);
 		return -EINVAL;
 	}
-	iccom_socket_info("Device iccom socket.%d created\n", device_id);
+	iccom_socket_info("Device iccom socket.%d created", device_id);
 
 	return count;
 }
@@ -1050,19 +1133,27 @@ static struct class iccom_socket_if_class = {
 static ssize_t iccom_dev_show(struct device *dev, struct device_attribute *attr,
 			      char *buf) 
 {
+	ICCOM_SK_CHECK_SYSFS_DEVICE_PARAMS("", return -EINVAL);
+
 	struct iccom_sockets_device *iccom_sockets_dev = 
 			    (struct iccom_sockets_device *)dev_get_drvdata(dev);
 
-	if(IS_ERR_OR_NULL(iccom_sockets_dev)) {
-		return scnprintf(buf, PAGE_SIZE, "Invalid parameters.");
+	if (IS_ERR_OR_NULL(iccom_sockets_dev)) {
+		iccom_socket_err("Invalid parameters.");
+		goto invalid_input;
 	}
 
-	if(IS_ERR_OR_NULL(&(iccom_sockets_dev->iccom))) {
-		return scnprintf(buf, PAGE_SIZE, "Iccom Sk has no Iccom device \
+	if (IS_ERR_OR_NULL(iccom_sockets_dev->iccom)) {
+		iccom_socket_err("Iccom Sk has no Iccom device \
 				associtated/invalid.");
+		goto invalid_input;
 	}
 
-	return scnprintf(buf, PAGE_SIZE, "Iccom Sk has an Iccom device already associated.");
+	return scnprintf(buf, PAGE_SIZE, "Iccom Sk has an Iccom device already \
+				associated: %s", kobject_name(&(dev->kobj)));
+
+invalid_input:
+	return scnprintf(buf, PAGE_SIZE, " ");
 }
 
 // iccom_dev_store - binds iccom devices to iccom socket devices
@@ -1077,23 +1168,20 @@ static ssize_t iccom_dev_show(struct device *dev, struct device_attribute *attr,
 static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr,
 			   const char *buf, size_t count)
 {
+	ICCOM_SK_CHECK_SYSFS_DEVICE_PARAMS("", return -EINVAL);
+
 	struct iccom_sockets_device *iccom_sockets_dev = 
 			    (struct iccom_sockets_device *)dev_get_drvdata(dev);
-	struct iccom_dev *iccom_dev;
-	struct device *iccom_dev_to_link;
-	char *device_name;
-	size_t total_count = count + 1;
-	int ret;
 
-	if(IS_ERR_OR_NULL(iccom_sockets_dev)) {
+	if (IS_ERR_OR_NULL(iccom_sockets_dev)) {
 		iccom_socket_err("Invalid iccom sockets device.");
 		return -EINVAL;
 	}
 
-	//if(!IS_ERR_OR_NULL(&(iccom_sockets_dev->iccom))) {
-	//	iccom_socket_err("Iccom device already associated Iccom socket");
-	//	return -EINVAL;
-	//}
+	if (!IS_ERR_OR_NULL(iccom_sockets_dev->iccom)) {
+		iccom_socket_err("Iccom device already associated Iccom socket");
+		return -EINVAL;
+	}
 	
 	if (count >= PAGE_SIZE) {
 		iccom_socket_err("Input data is longer than expected (%lu)", 
@@ -1101,9 +1189,12 @@ static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr
 		return -EINVAL;
 	}
 
+	char *device_name;
+	size_t total_count = count + 1;
+
 	device_name = (char *) kzalloc(total_count, GFP_KERNEL);
 
-	if(IS_ERR_OR_NULL(device_name)) {
+	if (IS_ERR_OR_NULL(device_name)) {
 		return -ENOMEM;
 	}
 
@@ -1111,71 +1202,81 @@ static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr
 
 	if (device_name[count] != 0) {
 		iccom_socket_err("Non-null terminated string. Invalid input.");
-		goto clean_up_device_name_buffer_memory;
+		kfree(device_name);
+		return -EFAULT;
 	}
+
+	struct device *iccom_dev_to_link;
 
 	iccom_dev_to_link = bus_find_device_by_name(&platform_bus_type, NULL, 
 						    device_name);
 
 	kfree(device_name);
 
-	if(IS_ERR_OR_NULL(iccom_dev_to_link)) {
+	if (IS_ERR_OR_NULL(iccom_dev_to_link)) {
 		iccom_socket_err("Iccom device given as input is invalid.");
 		return -EINVAL;
 	}
 
-	device_link_add(dev, iccom_dev_to_link, DL_FLAG_AUTOREMOVE_CONSUMER);
+	struct device_link* link = device_link_add(dev, iccom_dev_to_link, 
+						DL_FLAG_AUTOREMOVE_CONSUMER);
+	if (IS_ERR_OR_NULL(link)) {
+		iccom_socket_err("Unable to bind iccom sk to provided iccom.");
+		return -EINVAL;
+	}
+
+	struct iccom_dev *iccom_dev;
 
 	iccom_dev = (struct iccom_dev *) dev_get_drvdata(iccom_dev_to_link);
-	if(IS_ERR_OR_NULL(iccom_dev)) {
+	if (IS_ERR_OR_NULL(iccom_dev)) {
+		device_link_del(link);
 		iccom_socket_err("Iccom device given as input is invalid.");
 		return -EINVAL;
 	}
 
-	iccom_sockets_dev->iccom = *iccom_dev;
+	iccom_sockets_dev->iccom = iccom_dev;
 
-	ret = __iccom_socket_device_init(iccom_sockets_dev);
-	if(ret != 0) {
-		iccom_socket_err("Iccom socket device init failed.");
+	int ret = 0;
+	ret = iccom_skif_run(iccom_sockets_dev);
+	if (ret != 0) {
+		device_link_del(link);
+		iccom_socket_err("Iccom sk if device run failed.");
 		return -EINVAL;
 	}
 
 	iccom_socket_info("Iccom device binding to Iccom socket device was \
 			   sucessful");
 	return count;
-
-clean_up_device_name_buffer_memory:
-	iccom_socket_err("Iccom socket device init failed.");
-	kfree(device_name);
-	return -EFAULT;
 }
 static DEVICE_ATTR_RW(iccom_dev);
 
-// check_protocol_family_already_assigned - traverses the tree of devices 
-//					  assigned to the iccom_sockets_if
-//					  driver and checks if given protocol 
-//					  family number is already in use
+// iccom_skif_check_protocol_family_availability - traverses the tree of devices 
+//					        assigned to the iccom_sockets_if
+//					     driver and checks if given protocol 
+//					         family number is already in use
 //
 // @dev - iccom socket device
-// @buf - buffer with protocol family number
+// @data - buffer with protocol family number
 //
 // return:
-//      0 - desired protocol family is not assigned to existing devices
-//      1 - desired protocol family is already in use (stops search)
-static int check_protocol_family_already_assigned(struct device *dev, void *data)
+//      0 - input protocol family is not assigned to existing devices
+//      1 - input protocol family is already in use (stops search)
+static int iccom_skif_check_protocol_family_availability(struct device *dev, 
+								void *data)
 {
 	struct iccom_sockets_device *iccom_sock_dev = 
 			(struct iccom_sockets_device *)dev_get_drvdata(dev);
-	int protocol_family;
 
-	if(IS_ERR_OR_NULL(iccom_sock_dev) || IS_ERR_OR_NULL(data)) {
+	if (IS_ERR_OR_NULL(iccom_sock_dev) || IS_ERR_OR_NULL(data)) {
 		iccom_socket_err("Invalid parameters.");
 		return -ENOENT;
 	}
 
+	int protocol_family;
+
 	protocol_family = *((int *)data);
 
-	if(protocol_family == iccom_sock_dev->protocol_family_id) {
+	if (protocol_family == iccom_sock_dev->protocol_family_id) {
 		iccom_socket_info("\n Already assigned protocol family %d for "
 				   "socket device %s", protocol_family, 
 				  dev->kobj.name);
@@ -1197,19 +1298,26 @@ static ssize_t protocol_family_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf, size_t count)
 {
-	struct iccom_sockets_device *iccom_sockets_dev = 
-			    (struct iccom_sockets_device *)dev_get_drvdata(dev);
-	unsigned int protocol_family = 0;
-	int ret = 0;
+	ICCOM_SK_CHECK_SYSFS_DEVICE_PARAMS("", return -EINVAL);
 
-	if(IS_ERR_OR_NULL(iccom_sockets_dev)) { 
+	struct iccom_sockets_device *iccom_sk_dev = 
+			    (struct iccom_sockets_device *)dev_get_drvdata(dev);
+
+	if (IS_ERR_OR_NULL(iccom_sk_dev)) { 
 		iccom_socket_err("Invalid parameters.");
 		return -EINVAL;
 	}
 
-	if(iccom_sockets_dev->protocol_family_id >= 0) {
+	/*if (iccom_sk_dev->socket_closed == 0) {
+		iccom_socket_err("Cannot change protocol family as iccom sk if \
+				 layer is in running state");
+                return -EINVAL;
+        }*/
+
+	if (iccom_sk_dev->protocol_family_id >= 0) {
 		iccom_socket_err("Protocol family is already assigned to this \
-				  iccom socket interface device.");
+				  iccom socket interface device (current value \
+				  %d).", iccom_sk_dev->protocol_family_id);
 		return -EPFNOSUPPORT;
 	}
 
@@ -1219,22 +1327,25 @@ static ssize_t protocol_family_store(struct device *dev,
 		return -EINVAL;
 	}
 
+	unsigned int protocol_family;
+	int ret = 0;
+
 	ret = kstrtouint(buf, 10, &protocol_family);
-	if(ret != 0) {
+	if (ret != 0) {
 		iccom_socket_err("Specified protocol family %s is invalid (error:%d)", 
 			buf, ret);
 		return -EINVAL;
 	}
 
 	ret = driver_for_each_device(dev->driver, NULL, &protocol_family, 
-					&check_protocol_family_already_assigned);
-	if(ret != 0) {
+				&iccom_skif_check_protocol_family_availability);
+	if (ret != 0) {
 		iccom_socket_err("Specified protocol family %s is already in use. "
 			"Please use a different one. (ret: %d)", buf, ret);
 		return -EINVAL;
 	}
 
-	iccom_sockets_dev->protocol_family_id = protocol_family;
+	iccom_sk_dev->protocol_family_id = protocol_family;
 
 	return count;
 }
@@ -1258,67 +1369,6 @@ int iccom_socket_sysfs_init(void)
 	return class_register(&iccom_socket_if_class);
 }
 
-// read_list_of_devices - callback function to get device list from driver
-//
-// return: 
-//	0 - return to continue the unregistration of rest of devices
-static int read_list_of_devices(struct device *dev, void* data)
-{
-	struct list_head *devices_list_head = (struct list_head *)data;
-
-	if(IS_ERR_OR_NULL(devices_list_head)) {
-		iccom_socket_err("List for device storing is invalid.");
-		return -EINVAL;
-	}
-	
-	struct device_list *device_list_entry = 
-				kzalloc(sizeof(struct device_list),GFP_KERNEL);
-	if(IS_ERR_OR_NULL(device_list_entry)) {
-		iccom_socket_err("No available memory to create \
-				device_list_entry.");
-		return -ENOMEM;
-	}
-
-	device_list_entry->dev = dev;
-	list_add(&device_list_entry->list, devices_list_head);
-
-	return 0;
-}
-
-// driver_unregister_devices - unregister devices from a platform driver
-// 
-// @driver - specific driver to get its devices unregistered
-//
-// return: void
-static void driver_unregister_devices(struct device_driver *driver)
-{
-	struct list_head driver_devices_list_head;
-	struct device_list *driver_device_list_entry, *tmp;
-	int ret;
-
-	INIT_LIST_HEAD(&driver_devices_list_head);
-
-	ret = driver_for_each_device(driver, NULL, 
-				&driver_devices_list_head, &read_list_of_devices);
-	if(ret < 0) {
-		iccom_socket_err("Failed to unregister devices from driver %s.",
-				driver->name);
-		list_for_each_entry_safe(driver_device_list_entry, tmp, 
-					&driver_devices_list_head, list) {
-			list_del(&driver_device_list_entry->list);
-			kfree(driver_device_list_entry);
-		}
-	} else {
-		list_for_each_entry_safe(driver_device_list_entry, tmp, 
-					&driver_devices_list_head, list) {
-			platform_device_unregister(
-				to_platform_device(driver_device_list_entry->dev));
-			list_del(&driver_device_list_entry->list);
-			kfree(driver_device_list_entry);
-		}
-	}
-}
-
 // iccom_sk_sysfs_init - unregisters the ICCOM Socket IF class for sysfs
 //
 // return: 
@@ -1340,28 +1390,34 @@ void iccom_socket_sysfs_destroy(void)
 //      -ENOMEM: no memory to allocate
 static int iccom_socket_if_probe(struct platform_device *pdev)
 {
-	struct iccom_sockets_device *iccom_sockets_dev_data;
-
-	if(IS_ERR_OR_NULL(pdev)) {
-		iccom_socket_warning("Probing a Iccom Socket Device failed - \
+	if (IS_ERR_OR_NULL(pdev)) {
+		iccom_socket_err("Probing a Iccom Socket Device failed - \
 					NULL pointer!");
 		return -EINVAL;
 	}
 
-	iccom_socket_info("Probing a Iccom Device with id: %d", pdev->id);
+	iccom_socket_info("Probing an Iccom Sk Device with id: %d", pdev->id);
 
-	iccom_sockets_dev_data = (struct iccom_sockets_device *)
+	struct iccom_sockets_device *iccom_skif_dev_data;
+
+	iccom_skif_dev_data = (struct iccom_sockets_device *)
 				 kzalloc(sizeof(struct iccom_sockets_device), 
 					  GFP_KERNEL);
 
-	if (IS_ERR_OR_NULL(iccom_sockets_dev_data)) {
-		iccom_socket_warning("Probing a Iccom Socket Device failed - \
+	if (IS_ERR_OR_NULL(iccom_skif_dev_data)) {
+		iccom_socket_err("Probing a Iccom Socket Device failed - \
 					no available space!");
 		return -ENOMEM;
 	}
+	int ret;
 
-	iccom_sockets_dev_data->protocol_family_id = -1;
-	dev_set_drvdata(&pdev->dev, iccom_sockets_dev_data);
+	ret = iccom_skif_init(iccom_skif_dev_data);
+	if (ret < 0) {
+		iccom_socket_err("Iccom sk init failed when probing");
+		return -EINVAL;
+	}
+
+	dev_set_drvdata(&pdev->dev, iccom_skif_dev_data);
 
 	return 0;
 }
@@ -1375,12 +1431,12 @@ static int iccom_socket_if_probe(struct platform_device *pdev)
 //      -EINVAL: device is null pointer
 static int iccom_socket_if_remove(struct platform_device *pdev)
 {
-	struct iccom_sockets_device *iccom_sockets_dev;
-
-	if(IS_ERR_OR_NULL(pdev)) {
+	if (IS_ERR_OR_NULL(pdev)) {
 	       goto invalid_params;
 	}
 	iccom_socket_info("Removing an Iccom Sk Device with id: %d", pdev->id);
+
+	struct iccom_sockets_device *iccom_sockets_dev;
 
 	iccom_sockets_dev = (struct iccom_sockets_device *)
 					       dev_get_drvdata(&pdev->dev);
@@ -1388,7 +1444,7 @@ static int iccom_socket_if_remove(struct platform_device *pdev)
 	       goto invalid_params;
 	}
 
-	int res = __iccom_socket_device_close(iccom_sockets_dev);
+	int res = iccom_skif_close(iccom_sockets_dev);
 	if (res < 0) {
 	       iccom_socket_err("Module closing failed, err: %d", -res);
 	}
@@ -1424,7 +1480,7 @@ static int __init iccom_socket_module_init(void)
 {
 	int ret;
 
-	ida_init(&iccom_socket_if_device_id);
+	ida_init(&iccom_skif_device_id);
 
 	ret = platform_driver_register(&iccom_socket_driver);
 	iccom_socket_sysfs_init();
@@ -1435,9 +1491,8 @@ static int __init iccom_socket_module_init(void)
 
 static void __exit iccom_socket_module_exit(void)
 {
-	ida_destroy(&iccom_socket_if_device_id);
+	ida_destroy(&iccom_skif_device_id);
 	iccom_socket_sysfs_destroy();
-	driver_unregister_devices(&iccom_socket_driver.driver);
 	platform_driver_unregister(&iccom_socket_driver);
 
 	iccom_socket_info("Module unloaded");

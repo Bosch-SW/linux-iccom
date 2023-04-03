@@ -120,6 +120,7 @@ RUN grep "${TEST_NAME}_5.python: PASS" /qemu_run_x86.log
 RUN grep "${TEST_NAME}_6.python: PASS" /qemu_run_x86.log
 RUN grep "${TEST_NAME}_final_1.python: PASS" /qemu_run_x86.log
 RUN grep "${TEST_NAME}_final_2.python: PASS" /qemu_run_x86.log
+RUN grep "iccom_sk_test_1: PASS" /qemu_run_x86.log
 
 # ARM
 

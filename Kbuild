@@ -1,6 +1,6 @@
 ccflags-y := -std=gnu99 -Wno-declaration-after-statement
 ccflags-y += -I$(src)/include
-ccflags-y += -DDEFAULT_SYMBOL_NAMESPACE=
+ccflags-y += -DICCOM_GIT_REPO_HASH=\"2820bb7e0e3668815ce6e0a7cf019ec3664eaf10\"
 
 ccflags-$(CONFIG_BOSCH_ICCOM_DEBUG) += -DICCOM_DEBUG
 ifeq ($(CONFIG_BOSCH_ICCOM_DEBUG), y)

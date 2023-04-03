@@ -532,37 +532,9 @@ should be made consistent with new ICCom Socket IF layout. So,
 the ICCom + SymSPI configuration runs out of the box, while other
 configurations require to be groomed.
 
-# 1. Iccom Sockets If user guide
+# Iccom Sockets If user guide
 
-Table of contents
-- [What is it?](#what-is-it)
-- [What is it for?](#what-is-it-for)
-- [What problem it solves](#what-problem-it-solves)
-	- [Scenario 1 (a bit epic):](#scenario-1-a-bit-epic)
-	- [Scenario 2 (a bit less epic):](#scenario-2-a-bit-less-epic)
-- [How does it look like](#how-does-it-look-like)
-	- [In Kernel context](#in-kernel-context)
-	- [In Hardware](#in-hardware)
-	- [From Protocol perspective](#from-protocol-perspective)
-	- [In internals](#in-internals)
-	- [Provided API](#provided-api)
-- [Current startup picture and module dependencies](#current-startup-picture-and-module-dependencies)
-- [How to build and run it](#how-to-build-and-run-it)
-- [What it is NOT about](#what-it-is-not-about)
-- [What about testing?](#what-about-testing)
-- [Current state](#current-state)
-- [1. Iccom Sockets If user guide](#1-iccom-sockets-if-user-guide)
-	- [1.1. Introduction](#11-introduction)
-	- [1.2. Iccom Sockets sysfs class and device attributes](#12-iccom-sockets-sysfs-class-and-device-attributes)
-		- [1.2.1. Iccom sockets if class](#121-iccom-sockets-if-class)
-			- [1.2.1.1. create\_device](#1211-create_device)
-			- [1.2.1.2. version](#1212-version)
-		- [1.2.2. Iccom sockets if device attributes](#122-iccom-sockets-if-device-attributes)
-			- [1.2.2.1. protocol\_family](#1221-protocol_family)
-			- [1.2.2.2. iccom\_dev](#1222-iccom_dev)
-
-
-## 1.1. Introduction
+## Introduction
 
 The `Iccom sockets if` implementation has proven its functionality when running
 in the physical environment, in a physical target device. However, its configuration
@@ -579,7 +551,7 @@ Using the test python scripts globally available to the iccom world (i.e., `Icco
 each driver and, moreover, test the data path from the transport layer to the
 `Iccom sockets if` layer.
 
-## 1.2. Iccom Sockets sysfs class and device attributes
+## Iccom Sockets sysfs class and device attributes
 
 The sysfs implementation for the `Iccom sockets if` means that nowadays there is a
 new Iccom Sockets If class. This class allows to create the several `Iccom sockets if` 
@@ -590,7 +562,7 @@ these configuration and testing activities are accomplished without having a
 dependency with a physical target device that most of the times is not available
 at early project stages. 
 
-### 1.2.1. Iccom sockets if class
+### Iccom sockets if class
 
 This class allows to group all devices from the `Iccom sockets if` since they all 
 share the same functionality. Additionaly, using the sysfs filesystem there is
@@ -600,7 +572,7 @@ Currently there are two attributes available for the `Iccom sockets if`: one to
 create `Iccom sockets if` devices [(create_device)](#1211-create_device) and the
 other to get the version/revision from the `Iccom sockets if` driver [(version)](#1212-version).
 
-#### 1.2.1.1. create_device
+#### *create_device*
 
 In order to create an `Iccom sockets if` device the following command can be
 issued and automatically it will set the device name and its id. 
@@ -609,7 +581,19 @@ issued and automatically it will set the device name and its id.
 
 This will result in a new device, completely registered and with a set of 
 attributes that can be used to configure it.
-#### 1.2.1.2. version
+
+#### *delete_device*
+
+An existing `Iccom sockets if` device can be deleted with a specific command:
+
+	echo 'iccom_sk_if_dev_name' > /sys/class/iccom_socket_if/create_device
+
+It will automatically release this device and free its resources. An important
+note concerns with the relationship between devices (iccom sk, iccom and 
+transport layers). This aspect needs to be taken into consideration for the 
+correct managing of such devices and to not break the dependency chain.
+
+#### *version*
 
 During the development cycle somthing that can be useful is to know which **version**
 does a device represents and therefore it will be noticeable which `Iccom sockets if`
@@ -617,13 +601,13 @@ driver implementation it provides. The following command returns this informatio
 
 	echo > /sys/class/iccom_socket_if/version
 
-### 1.2.2. Iccom sockets if device attributes
+### Iccom sockets if device attributes
 
 With each `Iccom sockets if` device created, a set of attributes get exposed for
 configuration needs. These attributes compose the configuration part of each 
 device.
 
-#### 1.2.2.1. protocol_family
+#### *protocol_family*
 
 The **protocol_family** makes possible the configuration of the socket's 
 protocol family that is part of an `Iccom sockets if` device. Each device has to
@@ -631,12 +615,16 @@ have a socket with different protocol family.
 
 	echo PROTOCOL_FAMILY_NR > /sys/devices/platform/iccom_socket_if.x/protocol_family
 
-#### 1.2.2.2. iccom_dev
+Since this protocol family attribute is related to a netlink socket, only a
+range of values is possible for the same. Therefore, only protocol family numbers
+starting from 22 are valid. The others are invalid for this device's socket setup.
+
+#### *iccom_dev*
 
 In order to be possible to test the sending and receiving of messages between
 the `Iccom sockets if` layer and the others below, there's the need of having
 an associated `Iccom` device.
-Furthermore, the **iccom_dev** attributes makes possible the indication of an
+Furthermore, the **iccom_dev** attributes makes possible the association of an
 existing `Iccom` device and to bind it to the respective `Iccom sockets if` 
 device.
 
@@ -646,3 +634,7 @@ As soon as this attribute is affected (as shown above), the `Iccom` device is
 binded to the indicated `Iccom sockets if` device, the associated netlink socket
 is created and initialized and the underlaying protocol is initialized, as well 
 as the callbacks that will handle data comming from both upper and lower layers.
+On the other hand, it is also possible to read this attribute so that one can
+perceive if the `Iccom sockets if` device has a `Iccom` device already associated.
+If so, the respective associated `Iccom` device name will be retrieved to the 
+user space console.
