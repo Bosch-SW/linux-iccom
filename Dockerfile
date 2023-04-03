@@ -18,12 +18,15 @@ COPY . .
 RUN make -C ${kernel_source_dir} M=${repo_path} \
                 CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM \
-        CONFIG_CHECK_SIGNATURE=n
+        CONFIG_CHECK_SIGNATURE=n \
+        CONFIG_ICCOM_VERSION=$(git rev-parse HEAD)
 
 # Default build
 RUN make -C ${kernel_source_dir} M=${repo_path} \
                 CONFIG_BOSCH_ICCOM=m \
-        CONFIG_CHECK_SIGNATURE=n
+        CONFIG_CHECK_SIGNATURE=n \
+        CONFIG_BOSCH_ICCOM_DEBUG=y \
+        CONFIG_ICCOM_VERSION=$(git rev-parse HEAD)
 
 # Copy Default build ko to initramfs for qemu test run
 RUN mkdir -p /builds/initramfs/content/modules/ && \
@@ -53,6 +56,8 @@ RUN <<EOF
         grep "iccom_test_2.python: PASS" /qemu_run.log                    && \
         grep "iccom_test_3.python: PASS" /qemu_run.log                    && \
         grep "iccom_test_4.python: PASS" /qemu_run.log                    && \
+        grep "iccom_test_5.python: PASS" /qemu_run.log                    && \
+        grep "iccom_test_6.python: PASS" /qemu_run.log                    && \
         grep "iccom_final_test.python: PASS" /qemu_run.log                && \
         grep "iccom_test_transport_final_test.python: PASS" /qemu_run.log
 EOF

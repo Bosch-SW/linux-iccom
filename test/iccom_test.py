@@ -39,7 +39,23 @@ def write_sysfs_file(file_to_write, content_to_write):
                                "    (file) %s \n"
                                "    (error) %s \n"
                                % (content_to_write, file_to_write, str(e)))
+        
+def check_sysfs_file_presence_expectation(file, expectation):
+    if os.path.exists(file) != expectation:
+        raise RuntimeError("sysfs file presence expectation mismatch\n"
+                               "    (file) %s \n"
+                               "    (actual) %s \n"
+                               "    (expectation) %s \n"
+                               % (file, not expectation, expectation))
 
+def check_sysfs_file_presence_expectation(file, expectation):
+    if os.path.exists(file) != expectation:
+        raise RuntimeError("sysfs file presence expectation mismatch\n"
+                               "    (file) %s \n"
+                               "    (actual) %s \n"
+                               "    (expectation) %s \n"
+                               % (file, not expectation, expectation))
+    
 def create_iccom_device():
     file = "/sys/class/iccom/create_iccom"
     command = " "
@@ -74,6 +90,11 @@ def delete_channel(iccom_dev, channel):
     file = "/sys/devices/platform/%s/channels_ctl" % (iccom_dev)
     command = "d%d" % (channel)
     write_sysfs_file(file, command)
+
+def iccom_version():
+    file = "/sys/class/iccom/version"
+    output, errorCode = read_sysfs_file(file)
+    return output, errorCode
 
 # Writes message to the given iccom channel
 # @iccom_dev {string} id of the iccom device
@@ -406,7 +427,6 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(
         # Check channel data
         check_ch_data(iccom_device, 1, "I am Luis", None)
 
-
 def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
                 params, get_test_info=False):
 
@@ -533,10 +553,22 @@ def iccom_check_devices_deletion(
                      , "test_id": "iccom_final_test.python" }
 
         device_name = params["device_name"]
+        number_of_devices = params["number_of_devices"]
 
         ###### Test sequence ######
+        
+        for i in range(number_of_devices):
+             iccom_device = "/sys/devices/platform/%s" % (device_name + str(i))
 
-        CheckIccomDevicesExistance(device_name)
+             # Check that sysfs channel file exists
+             check_sysfs_file_presence_expectation(iccom_device , True)
+
+             delete_iccom_device(device_name + str(i))
+
+             # Check that sysfs channel file does not exists
+             check_sysfs_file_presence_expectation(iccom_device , False)
+
+        CheckDeviceExistance(device_name)
 
 def iccom_test_transport_check_devices_deletion(
                 params, get_test_info=False):
@@ -547,52 +579,114 @@ def iccom_test_transport_check_devices_deletion(
                      , "test_id": "iccom_test_transport_final_test.python" }
 
         device_name = params["device_name"]
+        number_of_devices = params["number_of_devices"]
 
         ###### Test sequence ######
 
-        CheckIccomDevicesExistance(device_name)
+        for i in range(number_of_devices):
+             iccom_device = "/sys/devices/platform/%s" % (device_name + str(i))
 
-def CheckIccomDevicesExistance(device_regex):
+             # Check that sysfs channel file exists
+             check_sysfs_file_presence_expectation(iccom_device , True)
+
+             delete_iccom_device(device_name + str(i))
+
+             # Check that sysfs channel file does not exists
+             check_sysfs_file_presence_expectation(iccom_device , False)
+
+        CheckDeviceExistance(device_name)
+
+def CheckDeviceExistance(device_regex):
              # Check whether all iccom devices got deleted
         command = "find /sys/devices/platform/ -iname *%s* 2> /dev/null | wc -l | awk '{printf $0}'" % (device_regex)
         devices_num = subprocess.check_output(command, shell=True, text=True)
         if (str(devices_num) != str(0)):
            raise RuntimeError("Some iccom devices were not deleted: " + str(devices_num))
 
-if __name__ == '__main__':
 
+def iccom_data_sysfs_ch_creation_deletion_checkup(
+                params, get_test_info=False):
+
+        if (get_test_info):
+            return { "test_description": ("iccom -> create and delete channels multiple times")
+                     , "test_id": "iccom_test_5.python" }
+
+        transport_dev = params["transport_dev"]
+        iccom_device = params["iccom_device "]
+
+        ###### Test sequence ######
+
+        for i in range(10):
+             channel_file = "/sys/devices/platform/%s/channels/%d" % (iccom_device, i)
+
+             # Check that sysfs channel file does not exists
+             check_sysfs_file_presence_expectation(channel_file , False)
+             # Create sysfs iccom channel
+             create_iccom_channel(iccom_device, i)
+             # Check that sysfs channel file exists
+             check_sysfs_file_presence_expectation(channel_file , True)
+             # Check that there is no data in sysfs channel
+             check_ch_data(iccom_device, i, "", errno.EIO)
+
+             # Delete sysfs iccom channel
+             delete_channel(iccom_device, i)
+             # Check that sysfs channel file does not exists
+             check_sysfs_file_presence_expectation(channel_file , False)
+             # Check that there is no sysfs channel
+             check_ch_data(iccom_device, i, "", errno.ENOENT)
+
+def iccom_data_sysfs_iccom_test_transport_RW_creation_deletion_checkup(
+                params, get_test_info=False):
+
+        if (get_test_info):
+            return { "test_description": ("iccom -> delete R&W files which do not exist")
+                     , "test_id": "iccom_test_6.python" }
+
+        transport_dev = params["transport_dev"]
+        iccom_device = params["iccom_device "]
+
+        ###### Test sequence ######
+
+        R_file = "/sys/devices/platform/%s/R" % (transport_dev)
+        W_file = "/sys/devices/platform/%s/W" % (transport_dev)
+
+        check_sysfs_file_presence_expectation(R_file , False)
+        check_sysfs_file_presence_expectation(W_file , False)
+
+        create_transport_device_RW_files(transport_dev)
+
+        check_sysfs_file_presence_expectation(R_file , True)
+        check_sysfs_file_presence_expectation(W_file , True)
+
+        delete_transport_device_RW_files(transport_dev)
+
+        check_sysfs_file_presence_expectation(R_file , False)
+        check_sysfs_file_presence_expectation(W_file , False)
+
+if __name__ == '__main__':
+        number_of_devices = 6
         print("Inserting iccom.ko ..")
         execute_shell_command("insmod /modules/iccom.ko")
+        
+        output, errorCode = iccom_version()
+        print("ICCom revision: " + output)
 
         # iccom py start
 
         iccom_device = []
         iccom_test_transport_device = []
 
-        iccom_device.append("iccom.0")
-        iccom_device.append("iccom.1")
-        iccom_device.append("iccom.2")
-        iccom_device.append("iccom.3")
-
-        iccom_test_transport_device.append("iccom_test_transport.0")
-        iccom_test_transport_device.append("iccom_test_transport.1")
-        iccom_test_transport_device.append("iccom_test_transport.2")
-        iccom_test_transport_device.append("iccom_test_transport.3")
+        for i in range(number_of_devices):
+            iccom_device.append("iccom." + str(i))
+            iccom_test_transport_device.append("iccom_test_transport." + str(i))
 
         try:
-           # Create iccom device instances
-            for x in iccom_device:
+           # Create & Link iccom and iccom test transport device instances
+            for i in range(number_of_devices):
                 create_iccom_device()
-
-            # Create iccom device instances
-            for x in iccom_test_transport_device:
                 create_iccom_test_transport_device()
-            
-            # Link tranport device to iccom
-            link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[0], iccom_device[0])
-            link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[1], iccom_device[1])
-            link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[2], iccom_device[2])
-            link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[3], iccom_device[3])
+                link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[i], iccom_device[i])
+
         except Exception as e:
             print("[Aborting!] Setup ICCom Tests failed!")
             print(str(e))
@@ -603,13 +697,13 @@ if __name__ == '__main__':
 
         # Test #1
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_data
-                   , {"transport_dev": iccom_test_transport_device[1]
-                      , "iccom_device ": iccom_device[1]})
+                   , {"transport_dev": iccom_test_transport_device[0]
+                      , "iccom_device ": iccom_device[0]})
 
         # Test #2
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_without_transport_data
-                   , {"transport_dev": iccom_test_transport_device[0]
-                      , "iccom_device ": iccom_device[0]})
+                   , {"transport_dev": iccom_test_transport_device[1]
+                      , "iccom_device ": iccom_device[1]})
 
         # Test #3
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_payload_size
@@ -621,14 +715,26 @@ if __name__ == '__main__':
                    , {"transport_dev": iccom_test_transport_device[3]
                       , "iccom_device ": iccom_device[3]})
 
-       # iccom py end
-        print("Removing iccom.ko ..")
-        execute_shell_command("rmmod iccom.ko")
+        #Test #5
+        iccom_test(iccom_data_sysfs_ch_creation_deletion_checkup
+                   , {"transport_dev": iccom_test_transport_device[4]
+                      , "iccom_device ": iccom_device[4]})
+
+        #Test #6
+        iccom_test(iccom_data_sysfs_iccom_test_transport_RW_creation_deletion_checkup
+                   , {"transport_dev": iccom_test_transport_device[5]
+                      , "iccom_device ": iccom_device[5]})
 
         # Final Test #1
         iccom_test(iccom_check_devices_deletion
-                   , {"device_name": "iccom."})
+                    , {"device_name": "iccom."
+                    , "number_of_devices": number_of_devices})
 
         # Final Test #2
         iccom_test(iccom_test_transport_check_devices_deletion
-                   , {"device_name": "iccom_test_transport."})
+                    , {"device_name": "iccom_test_transport."
+                    , "number_of_devices": number_of_devices})
+
+       # iccom py end
+        print("Removing iccom.ko ..")
+        execute_shell_command("rmmod iccom.ko")

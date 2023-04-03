@@ -285,6 +285,7 @@ int iccom_read_message(struct iccom_dev *iccom
                 , unsigned int *msg_id__out);
 void iccom_print_statistics(struct iccom_dev *iccom);
 int iccom_init(struct iccom_dev *iccom);
+int iccom_startup(struct iccom_dev *iccom);
 void iccom_close(struct iccom_dev *iccom);
 int iccom_init_binded(
                 struct iccom_dev *iccom
