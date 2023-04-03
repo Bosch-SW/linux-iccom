@@ -66,17 +66,17 @@ def delete_iccom_device(iccom_dev):
     command = "%s" % (iccom_dev)
     write_sysfs_file(file, command)
 
-def create_iccom_test_transport_device():
-    file = "/sys/class/iccom_test_transport/create_transport"
+def create_fd_test_transport_device():
+    file = "/sys/class/fd_test_transport/create_transport"
     command = " "
     write_sysfs_file(file, command)
 
-def delete_iccom_test_transport_device(transport_dev):
-    file = "/sys/class/iccom_test_transport/delete_transport"
+def delete_fd_test_transport_device(transport_dev):
+    file = "/sys/class/fd_test_transport/delete_transport"
     command = "%s" % (transport_dev)
     write_sysfs_file(file, command)
 
-def link_iccom_test_transport_device_to_iccom_device(transport_dev, iccom_dev):
+def link_fd_test_transport_device_to_iccom_device(transport_dev, iccom_dev):
     file = "/sys/devices/platform/%s/transport" % (iccom_dev)
     command = transport_dev
     write_sysfs_file(file, command)
@@ -401,14 +401,14 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(
                      , "test_id": "iccom_test_1.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device "]
+        iccom_device = params["iccom_device"]
 
         ###### Test sequence ######
 
         create_iccom_channel(iccom_device, 1)
         create_transport_device_RW_files(transport_dev)
 
-        # Send a message from ICCOM to iccom test transport via channel 1
+        # Send a message from ICCOM to Full Duplex Test Transport via channel 1
         iccom_write(iccom_device, 1, "Who are you?")
 
         # Default xfer
@@ -436,7 +436,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
                      , "test_id": "iccom_test_2.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device "]
+        iccom_device = params["iccom_device"]
 
         ###### Test sequence ######
 
@@ -467,14 +467,14 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
                      , "test_id": "iccom_test_3.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device "]
+        iccom_device = params["iccom_device"]
 
         ###### Test sequence ######
 
         create_iccom_channel(iccom_device, 1)
         create_transport_device_RW_files(transport_dev)
 
-        # Send a message from ICCOM to iccom test transport via channel 1
+        # Send a message from ICCOM to Full Duplex Test Transport via channel 1
         iccom_write(iccom_device, 1, "Who are you?")
 
         # Do (Default xfer) Data Exchange + ACK
@@ -507,14 +507,14 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
                      , "test_id": "iccom_test_4.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device "]
+        iccom_device = params["iccom_device"]
 
         ###### Test sequence ######
 
         create_iccom_channel(iccom_device, 1000)
         create_transport_device_RW_files(transport_dev)
 
-        # Send a message from ICCOM to iccom test transport via channel 1
+        # Send a message from ICCOM to Full Duplex Test Transport via channel 1
         iccom_write(iccom_device, 1000, "Is there anybody there?")
 
         # Do (Default xfer) Data Exchange + NACK
@@ -570,13 +570,13 @@ def iccom_check_devices_deletion(
 
         CheckDeviceExistance(device_name)
 
-def iccom_test_transport_check_devices_deletion(
+def fd_test_transport_check_devices_deletion(
                 params, get_test_info=False):
 
         if (get_test_info):
-            return { "test_description": ("iccom_test_transport -> check sucessfull removal"
+            return { "test_description": ("fd_test_transport -> check sucessfull removal"
                                           " of all devices")
-                     , "test_id": "iccom_test_transport_final_test.python" }
+                     , "test_id": "fd_test_transport_final_test.python" }
 
         device_name = params["device_name"]
         number_of_devices = params["number_of_devices"]
@@ -612,7 +612,7 @@ def iccom_data_sysfs_ch_creation_deletion_checkup(
                      , "test_id": "iccom_test_5.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device "]
+        iccom_device = params["iccom_device"]
 
         ###### Test sequence ######
 
@@ -635,7 +635,7 @@ def iccom_data_sysfs_ch_creation_deletion_checkup(
              # Check that there is no sysfs channel
              check_ch_data(iccom_device, i, "", errno.ENOENT)
 
-def iccom_data_sysfs_iccom_test_transport_RW_creation_deletion_checkup(
+def iccom_data_sysfs_fd_test_transport_RW_creation_deletion_checkup(
                 params, get_test_info=False):
 
         if (get_test_info):
@@ -643,7 +643,7 @@ def iccom_data_sysfs_iccom_test_transport_RW_creation_deletion_checkup(
                      , "test_id": "iccom_test_6.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device "]
+        iccom_device = params["iccom_device"]
 
         ###### Test sequence ######
 
@@ -677,18 +677,18 @@ if __name__ == '__main__':
         # iccom py start
 
         iccom_device = []
-        iccom_test_transport_device = []
+        fd_test_transport_device = []
 
         for i in range(number_of_devices):
             iccom_device.append("iccom." + str(i))
-            iccom_test_transport_device.append("iccom_test_transport." + str(i))
+            fd_test_transport_device.append("fd_test_transport." + str(i))
 
         try:
-           # Create & Link iccom and iccom test transport device instances
+           # Create & Link iccom and Full Duplex Test Transport device instances
             for i in range(number_of_devices):
                 create_iccom_device()
-                create_iccom_test_transport_device()
-                link_iccom_test_transport_device_to_iccom_device(iccom_test_transport_device[i], iccom_device[i])
+                create_fd_test_transport_device()
+                link_fd_test_transport_device_to_iccom_device(fd_test_transport_device[i], iccom_device[i])
 
         except Exception as e:
             print("[Aborting!] Setup ICCom Tests failed!")
@@ -700,33 +700,33 @@ if __name__ == '__main__':
 
         # Test #1
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_data
-                   , {"transport_dev": iccom_test_transport_device[0]
-                      , "iccom_device ": iccom_device[0]})
+                   , {"transport_dev": fd_test_transport_device[0]
+                      , "iccom_device": iccom_device[0]})
 
         # Test #2
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_without_transport_data
-                   , {"transport_dev": iccom_test_transport_device[1]
-                      , "iccom_device ": iccom_device[1]})
+                   , {"transport_dev": fd_test_transport_device[1]
+                      , "iccom_device": iccom_device[1]})
 
         # Test #3
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_payload_size
-                   , {"transport_dev": iccom_test_transport_device[2]
-                      , "iccom_device ": iccom_device[2]})
+                   , {"transport_dev": fd_test_transport_device[2]
+                      , "iccom_device": iccom_device[2]})
 
         #Test #4
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack
-                   , {"transport_dev": iccom_test_transport_device[3]
-                      , "iccom_device ": iccom_device[3]})
+                   , {"transport_dev": fd_test_transport_device[3]
+                      , "iccom_device": iccom_device[3]})
 
         #Test #5
         iccom_test(iccom_data_sysfs_ch_creation_deletion_checkup
-                   , {"transport_dev": iccom_test_transport_device[4]
-                      , "iccom_device ": iccom_device[4]})
+                   , {"transport_dev": fd_test_transport_device[4]
+                      , "iccom_device": iccom_device[4]})
 
         #Test #6
-        iccom_test(iccom_data_sysfs_iccom_test_transport_RW_creation_deletion_checkup
-                   , {"transport_dev": iccom_test_transport_device[5]
-                      , "iccom_device ": iccom_device[5]})
+        iccom_test(iccom_data_sysfs_fd_test_transport_RW_creation_deletion_checkup
+                   , {"transport_dev": fd_test_transport_device[5]
+                      , "iccom_device": iccom_device[5]})
 
         # Final Test #1
         iccom_test(iccom_check_devices_deletion
@@ -734,8 +734,8 @@ if __name__ == '__main__':
                     , "number_of_devices": number_of_devices})
 
         # Final Test #2
-        iccom_test(iccom_test_transport_check_devices_deletion
-                    , {"device_name": "iccom_test_transport."
+        iccom_test(fd_test_transport_check_devices_deletion
+                    , {"device_name": "fd_test_transport."
                     , "number_of_devices": number_of_devices})
 
         # iccom py end

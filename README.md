@@ -412,22 +412,22 @@ levels of noise.
 # Qemu Sysfs testing
 
 ICCom comes with a sysfs ability to create/destroy ICCom and
-ICCom test transport devices, link those devices, simulate from
+Full Duplex Test Transport devices, link those devices, simulate from
 userspace data to be sent from ICCom to ICCom test device and vice
 versa and sniff the data that flows to physical channels in sysfs
 channels. There are predefined python tests that use these sysfs
 functionalities and check the ICCom behavior as a regression test.
 
 Sysfs functionalities include:
-* dynamically creating successive iccom and iccom test transport devices;
-* dynamically deleting successive iccom and iccom test transport devices;
-* link iccom test transport devices to iccom ones;
+* dynamically creating successive iccom and Full Duplex Test Transport devices;
+* dynamically deleting successive iccom and Full Duplex Test Transport devices;
+* link Full Duplex Test Transport devices to iccom ones;
 * create, use and destroy communication channels inside the iccom device;
-* create, use and destroy transport communication files in iccom test transport (R & W files):
+* create, use and destroy transport communication files in Full Duplex Test Transport (R & W files):
 
 ![ICCom Sysfs Structure](docs/assets/iccom_sysfs_structure.png)
 
-Create iccom devices
+Create ICCom devices
 ```
 # Run the command multiple times to create successive iccom devices
 
@@ -438,21 +438,21 @@ sudo sh -c "echo > /sys/class/iccom/create_iccom"
 sudo sh -c "echo > /sys/class/iccom/create_iccom"
 ```
 
-Create iccom test transport devices
+Create Full Duplex Test Transport devices
 ```
-# Run the command multiple times to create successive iccom test transport devices
+# Run the command multiple times to create successive Full Duplex Test Transport devices
 
-# /sys/devices/platform/iccom_test_transport.0
+# /sys/devices/platform/fd_test_transport.0
 sudo sh -c "echo > /sys/class/iccom/create_transport"
 
-# /sys/devices/platform/iccom_test_transport.1
+# /sys/devices/platform/fd_test_transport.1
 sudo sh -c "echo > /sys/class/iccom/create_transport"
-Link iccom test transport to iccom devices
-# link iccom_test_transport.0 to iccom.0
-sudo sh -c "echo iccom_test_transport.0 > /sys/devices/platform/iccom.0/transport"
+Link Full Duplex Test Transport to iccom devices
+# link fd_test_transport.0 to iccom.0
+sudo sh -c "echo fd_test_transport.0 > /sys/devices/platform/iccom.0/transport"
 ```
 
-Create iccom channel
+Create ICCom channel
 ```
 # Run the command as "echo cX (...)" (X is the channel's id number) to create an iccom channel with id = X
 
@@ -463,7 +463,7 @@ sudo sh -c "echo c1 > /sys/devices/platform/iccom.0/channels_ctl"
 sudo sh -c "echo c2 > /sys/devices/platform/iccom.0/channels_ctl"
 ```
 
-Destroy iccom channel
+Destroy ICCom channel
 ```
 # Run the command as "echo dX (...)" (X is the channel's id number) to destroy the existing iccom channel with id = X
 
@@ -474,33 +474,33 @@ sudo sh -c "echo d1 > /sys/devices/platform/iccom.0/channels_ctl"
 sudo sh -c "echo d2 > /sys/devices/platform/iccom.0/channels_ctl" 
 ```
 
-Send data from iccom to iccom test transport device
+Send data from ICCom to Full Duplex Test Transport device
 ```
 # data shall be in the format of string
-# channel 1 and iccom_test_transport.0
-sudo sh -c "echo Hello from user space side! > /sys/devices/platform/iccom_test_transport.0/channels/1"
+# channel 1 and fd_test_transport.0
+sudo sh -c "echo Hello from user space side! > /sys/devices/platform/fd_test_transport.0/channels/1"
 ```
 
-Create/delete R & W files for transport
+Create/delete R & W files for Full Duplex Test Transport 
 ```
-# Create R and W files in iccom_test_transport.0/ 
-sudo sh -c "echo 1 > /sys/devices/platform/iccom_test_transport.0/showRW_ctl"
+# Create R and W files in fd_test_transport.0/ 
+sudo sh -c "echo 1 > /sys/devices/platform/fd_test_transport.0/showRW_ctl"
 
-# Destroy R and W files in iccom_test_transport.0/
-sudo sh -c "echo 0 > /sys/devices/platform/iccom_test_transport.0/showRW_ctl"
-```
-
-Send data from iccom test transport to iccom device
-```
-# send data to iccom_test_transport.0 and it shall be in the format aabbcc
-sudo sh -c "echo aabbcc > /sys/devices/platform/iccom_test_transport.0/W"
+# Destroy R and W files in fd_test_transport.0/
+sudo sh -c "echo 0 > /sys/devices/platform/fd_test_transport.0/showRW_ctl"
 ```
 
-Read data from iccom to iccom_test_transport device
+Send data from Full Duplex Test Transport to ICCom device
 ```
-# read data sent from iccom.? to iccom_test_transport.0 in the format aabbcc
+# send data to fd_test_transport.0 and it shall be in the format aabbcc
+sudo sh -c "echo aabbcc > /sys/devices/platform/fd_test_transport.0/W"
+```
 
-cat /sys/devices/platform/iccom_test_transport.0/R
+Read data from ICCom to Full Duplex Test Transport  device
+```
+# read data sent from iccom.? to fd_test_transport.0 in the format aabbcc
+
+cat /sys/devices/platform/fd_test_transport.0/R
 ```
 
 # Current state

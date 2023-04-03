@@ -51,32 +51,32 @@
 #define fd_test_transport_warning(fmt, ...)				\
 	pr_warning(FD_TEST_TRANSPORT_LOG_PREFIX"%s: "fmt"\n", __func__	\
 			, ##__VA_ARGS__)
-#define ICCOM_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE()		\
-	struct iccom_test_transport_dev_private *xfer_device =		\
-		iccom_test_transport->p;
-#define ICCOM_TEST_TRANSPORT_XFER_DEV_ON_FINISH(error_action)		\
+#define FD_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE()		\
+	struct fd_test_transport_dev_private *xfer_device =		\
+		fd_test_transport->p;
+#define FD_TEST_TRANSPORT_XFER_DEV_ON_FINISH(error_action)		\
 	if (xfer_device->finishing) {					\
 		error_action;						\
 	}
-#define ICCOM_TEST_TRANSPORT_GET_DEVICE()				\
-	struct iccom_test_transport_dev * iccom_test_transport =	\
-		(struct iccom_test_transport_dev *)			\
+#define FD_TEST_TRANSPORT_GET_DEVICE()				\
+	struct fd_test_transport_dev * fd_test_transport =	\
+		(struct fd_test_transport_dev *)			\
 					dev_get_drvdata(device);
-#define ICCOM_TEST_TRANSPORT_CHECK_DEVICE(msg, error_action)		\
-	if (IS_ERR_OR_NULL(iccom_test_transport)) {			\
+#define FD_TEST_TRANSPORT_CHECK_DEVICE(msg, error_action)		\
+	if (IS_ERR_OR_NULL(fd_test_transport)) {			\
 		fd_test_transport_err(					\
 			"%s: no device; "msg"\n"			\
 			, __func__);					\
 		error_action;						\
 	}
-#define ICCOM_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE(msg, error_action)	\
-	if (IS_ERR_OR_NULL(iccom_test_transport->p)) {			\
+#define FD_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE(msg, error_action)	\
+	if (IS_ERR_OR_NULL(fd_test_transport->p)) {			\
 		fd_test_transport_err(					\
 			"%s: no private part of device; "msg"\n"	\
 			, __func__);					\
 		error_action;						\
 	}
-#define ICCOM_TEST_TRANSPORT_CHECK_PTR(ptr, error_action)		\
+#define FD_TEST_TRANSPORT_CHECK_PTR(ptr, error_action)		\
 	if (IS_ERR_OR_NULL(ptr)) {					\
 		fd_test_transport_err(					\
 			"%s: pointer "# ptr" is invalid;\n"		\
@@ -85,8 +85,8 @@
 	}
 /* ------------------------ GLOBAL VARIABLES ----------------------------*/
 
-// Serves to allocate unique ids for an iccom test transport platform device
-struct ida iccom_test_transport_dev_id;
+// Serves to allocate unique ids for an Full Duplex Test Transport platform device
+struct ida fd_test_transport_dev_id;
 
 /* ------------------------ FORWARD DECLARATIONS ------------------------*/
 
@@ -102,7 +102,7 @@ struct ida iccom_test_transport_dev_id;
 //   != 0: There is a device link dependent
 ssize_t check_device_link_dependency(struct device *fd_test_transport)
 {
-	ICCOM_TEST_TRANSPORT_CHECK_PTR(fd_test_transport, return -EFAULT)
+	FD_TEST_TRANSPORT_CHECK_PTR(fd_test_transport, return -EFAULT)
 
 	if(list_empty(&fd_test_transport->links.suppliers)) {
 		fd_test_transport_err("There is an dependent device for this transport device.");
@@ -166,7 +166,7 @@ void xfer_free(struct full_duplex_xfer *xfer) {
 //      -EINVAL: xfer is null pointer
 //      -ENOMEM: no memory to allocate
 int iccom_sysfs_test_update_wire_data(
-		struct iccom_test_transport_dev_private *xfer_device,
+		struct fd_test_transport_dev_private *xfer_device,
 		char data_transport_to_iccom[],
 		size_t data_transport_to_iccom_size)
 {
@@ -256,7 +256,7 @@ int deep_xfer_copy(struct full_duplex_xfer *src, struct full_duplex_xfer *dst) {
 //
 // RETURNS:
 //      >0: id of the next xfer
-int iterate_to_next_xfer_id(struct iccom_test_transport_dev_private *xfer_device) {
+int iterate_to_next_xfer_id(struct fd_test_transport_dev_private *xfer_device) {
 	int res = xfer_device->next_xfer_id;
 
 	xfer_device->next_xfer_id++;
@@ -278,7 +278,7 @@ int iterate_to_next_xfer_id(struct iccom_test_transport_dev_private *xfer_device
 //      0: ok
 //     <0: errors
 int accept_data(
-		struct iccom_test_transport_dev_private* xfer_device,
+		struct fd_test_transport_dev_private* xfer_device,
 		struct __kernel full_duplex_xfer *xfer)
 {
 	// Copy xfer to dev xfer as is. In later
@@ -298,7 +298,7 @@ int accept_data(
 //
 // @xfer_device {valid ptr} xfer device
 __maybe_unused
-static void iccom_transport_exchange_data(struct iccom_test_transport_dev_private *xfer_device)
+static void iccom_transport_exchange_data(struct fd_test_transport_dev_private *xfer_device)
 {
 	if (IS_ERR_OR_NULL(xfer_device->xfer.done_callback)) {
 		return;
@@ -345,11 +345,11 @@ int data_xchange(
 		void __kernel *device , struct __kernel full_duplex_xfer *xfer,
 		bool force_size_change)
 {
-	ICCOM_TEST_TRANSPORT_GET_DEVICE();
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE("", return -ENODEV);
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return -EFAULT);
-	ICCOM_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
-	ICCOM_TEST_TRANSPORT_XFER_DEV_ON_FINISH(return -EHOSTDOWN);
+	FD_TEST_TRANSPORT_GET_DEVICE();
+	FD_TEST_TRANSPORT_CHECK_DEVICE("", return -ENODEV);
+	FD_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return -EFAULT);
+	FD_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
+	FD_TEST_TRANSPORT_XFER_DEV_ON_FINISH(return -EHOSTDOWN);
 	return 0;
 }
 
@@ -372,10 +372,10 @@ int default_data_update(
                 void __kernel *device, struct full_duplex_xfer *xfer,
                 bool force_size_change)
 {
-	ICCOM_TEST_TRANSPORT_GET_DEVICE();
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE("", return -ENODEV);
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return -EFAULT);
-	ICCOM_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
+	FD_TEST_TRANSPORT_GET_DEVICE();
+	FD_TEST_TRANSPORT_CHECK_DEVICE("", return -ENODEV);
+	FD_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return -EFAULT);
+	FD_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
         return accept_data(xfer_device, xfer);
 }
 
@@ -393,11 +393,11 @@ int default_data_update(
 //      false: not running
 __maybe_unused
 bool is_running(void __kernel *device) {
-	ICCOM_TEST_TRANSPORT_GET_DEVICE();
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE("", return false);
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return false);
-	ICCOM_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
-	ICCOM_TEST_TRANSPORT_XFER_DEV_ON_FINISH(return false);
+	FD_TEST_TRANSPORT_GET_DEVICE();
+	FD_TEST_TRANSPORT_CHECK_DEVICE("", return false);
+	FD_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return false);
+	FD_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
+	FD_TEST_TRANSPORT_XFER_DEV_ON_FINISH(return false);
 	return xfer_device->running;
 }
 
@@ -416,10 +416,10 @@ bool is_running(void __kernel *device) {
 //     <0: errors
 __maybe_unused
 int init(void __kernel *device, struct full_duplex_xfer *default_xfer) {
-	ICCOM_TEST_TRANSPORT_GET_DEVICE();
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE("", return -ENODEV);
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return -EFAULT);
-	ICCOM_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
+	FD_TEST_TRANSPORT_GET_DEVICE();
+	FD_TEST_TRANSPORT_CHECK_DEVICE("", return -ENODEV);
+	FD_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return -EFAULT);
+	FD_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
 	xfer_init(&xfer_device->xfer);
 	xfer_device->next_xfer_id = 1;
 	xfer_device->finishing = false;
@@ -442,10 +442,10 @@ int init(void __kernel *device, struct full_duplex_xfer *default_xfer) {
 //     <0: errors
 __maybe_unused
 int close(void __kernel *device) {
-	ICCOM_TEST_TRANSPORT_GET_DEVICE();
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE("", return -ENODEV);
-	ICCOM_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return -EFAULT);
-	ICCOM_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
+	FD_TEST_TRANSPORT_GET_DEVICE();
+	FD_TEST_TRANSPORT_CHECK_DEVICE("", return -ENODEV);
+	FD_TEST_TRANSPORT_CHECK_DEVICE_PRIVATE("", return -EFAULT);
+	FD_TEST_TRANSPORT_DEVICE_PRIVATE_TO_XFER_DEVICE();
 	xfer_device->finishing = true;
 	xfer_device->running = false;
 	xfer_free(&xfer_device->xfer);
@@ -471,7 +471,7 @@ int reset(void __kernel *device, struct full_duplex_xfer *default_xfer) {
 	return init(device, default_xfer);
 }
 
-/*------------------- ICCOM TEST TRANSPORT DEVICE ----------------------------*/
+/*------------------- FULL DUPLEX TEST TRANSPORT DEVICE ----------------------------*/
 
 // Parse the hex string into a byte array.
 //
@@ -609,20 +609,20 @@ static ssize_t R_show(
 		fd_test_transport_err("the wire transport kernel dev not provided");
 		return -EINVAL;
 	}
-	struct iccom_test_transport_dev * iccom_test_transport
-		= (struct iccom_test_transport_dev *)dev_get_drvdata(dev);
+	struct fd_test_transport_dev * fd_test_transport
+		= (struct fd_test_transport_dev *)dev_get_drvdata(dev);
 
-	if(IS_ERR_OR_NULL(iccom_test_transport)) {
+	if(IS_ERR_OR_NULL(fd_test_transport)) {
 		fd_test_transport_err("the wire transport dev broken ptr");
 		return -EFAULT;
 	}
 
-	if(IS_ERR_OR_NULL(iccom_test_transport->p)) {
+	if(IS_ERR_OR_NULL(fd_test_transport->p)) {
 		fd_test_transport_err("the wire transport dev private data broken ptr");
 		return -EFAULT;
 	}
 
-	struct iccom_test_transport_dev_private *xfer_device = iccom_test_transport->p;
+	struct fd_test_transport_dev_private *xfer_device = fd_test_transport->p;
 	if(IS_ERR_OR_NULL(xfer_device)) {
 		fd_test_transport_err("the xfer dev broken ptr");
 		return -EINVAL;
@@ -666,21 +666,21 @@ static ssize_t W_store(
 		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct iccom_test_transport_dev * iccom_test_transport = NULL;
+	struct fd_test_transport_dev * fd_test_transport = NULL;
 
-	iccom_test_transport = (struct iccom_test_transport_dev *)dev_get_drvdata(dev);
+	fd_test_transport = (struct fd_test_transport_dev *)dev_get_drvdata(dev);
 
-	if(IS_ERR_OR_NULL(iccom_test_transport)) {
+	if(IS_ERR_OR_NULL(fd_test_transport)) {
 		fd_test_transport_err("the wire transport dev broken ptr");
 		return -EFAULT;
 	}
 
-	if(IS_ERR_OR_NULL(iccom_test_transport->p)) {
+	if(IS_ERR_OR_NULL(fd_test_transport->p)) {
 		fd_test_transport_err("the wire transport dev private data broken ptr");
 		return -EFAULT;
 	}
 
-	struct iccom_test_transport_dev_private *xfer_device = iccom_test_transport->p;
+	struct fd_test_transport_dev_private *xfer_device = fd_test_transport->p;
 	if(IS_ERR_OR_NULL(xfer_device)) {
 		fd_test_transport_err("the xfer dev broken ptr");
 		return -EINVAL;
@@ -803,14 +803,14 @@ static DEVICE_ATTR_WO(showRW_ctl);
 // List of all Transport device attributes
 //
 // @dev_attr_showRW_ctl the Transport file to create/delete the R and W files
-static struct attribute *iccom_test_transport_dev_attrs[] = {
+static struct attribute *fd_test_transport_dev_attrs[] = {
 	&dev_attr_showRW_ctl.attr,
 	NULL,
 };
 
-ATTRIBUTE_GROUPS(iccom_test_transport_dev);
+ATTRIBUTE_GROUPS(fd_test_transport_dev);
 
-// Sysfs file to create Iccom Test Transport
+// Sysfs file to create Full Duplex Test Transport
 // devices via user space
 //
 // @class {valid ptr} transport class
@@ -826,7 +826,7 @@ static ssize_t create_transport_store(
 		const char *buf, size_t count)
 {
 	// Allocate one unused ID
-	int device_id = ida_alloc(&iccom_test_transport_dev_id,GFP_KERNEL);
+	int device_id = ida_alloc(&fd_test_transport_dev_id,GFP_KERNEL);
 
 	if (device_id < 0) {
 		fd_test_transport_err("Could not allocate a new unused ID");
@@ -834,11 +834,11 @@ static ssize_t create_transport_store(
 	}
 
 	struct platform_device *new_pdev = 
-		platform_device_register_simple("iccom_test_transport",
+		platform_device_register_simple("fd_test_transport",
 							device_id, NULL, 0);
 
 	if (IS_ERR_OR_NULL(new_pdev)) {
-		fd_test_transport_err("Could not register the device iccom_test_transport.%d",
+		fd_test_transport_err("Could not register the device fd_test_transport.%d",
 								device_id);
 		return -EFAULT;
 	}
@@ -848,7 +848,7 @@ static ssize_t create_transport_store(
 
 static CLASS_ATTR_WO(create_transport);
 
-// Sysfs class method for deleting iccom_test_transport instances
+// Sysfs class method for deleting fd_test_transport instances
 // trough the usage of sysfs internal mechanisms
 //
 // @class {valid ptr} iccom class
@@ -888,22 +888,22 @@ static ssize_t delete_transport_store(
 
 	(void)iccom_test_sysfs_trim_buffer(device_name, count);
 
-	struct device *iccom_test_transport_device = 
+	struct device *fd_test_transport_device = 
 		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
 	kfree(device_name);
 
-	if (IS_ERR_OR_NULL(iccom_test_transport_device)) {
-		fd_test_transport_err("Iccom Test Transport device is null.");
+	if (IS_ERR_OR_NULL(fd_test_transport_device)) {
+		fd_test_transport_err("Full Duplex Test Transport device is null.");
 		return -EFAULT;
 	}
 
-	ssize_t link_dependency = check_device_link_dependency(iccom_test_transport_device);
+	ssize_t link_dependency = check_device_link_dependency(fd_test_transport_device);
 	if(link_dependency != 0) {
 		return link_dependency;
 	}
 
-	platform_device_unregister(to_platform_device(iccom_test_transport_device));
+	platform_device_unregister(to_platform_device(fd_test_transport_device));
 
 	return count;
 
@@ -917,26 +917,26 @@ static CLASS_ATTR_WO(delete_transport);
 // List of all Transport class attributes
 //
 // @class_attr_create_transport sysfs file for creating
-//                              iccom_test_transport devices
+//                              fd_test_transport devices
 // @class_attr_delete_transport sysfs file for deleting
-//                              iccom_test_transport devices
-static struct attribute *iccom_test_transport_class_attrs[] = {
+//                              fd_test_transport devices
+static struct attribute *fd_test_transport_class_attrs[] = {
 	&class_attr_create_transport.attr,
 	&class_attr_delete_transport.attr,	
 	NULL
 };
 
-ATTRIBUTE_GROUPS(iccom_test_transport_class);
+ATTRIBUTE_GROUPS(fd_test_transport_class);
 
 // The Transport class definition
 //
 // @name class name
 // @owner the module owner
 // @class_groups group holding all the attributes
-static struct class iccom_test_transport_class = {
-    .name = "iccom_test_transport",
+static struct class fd_test_transport_class = {
+    .name = "fd_test_transport",
     .owner = THIS_MODULE,
-    .class_groups = iccom_test_transport_class_groups
+    .class_groups = fd_test_transport_class_groups
 };
 
 // Registers the Transport class for sysfs
@@ -945,116 +945,116 @@ static struct class iccom_test_transport_class = {
 //      0: ok
 //      !0: nok
 int iccom_test_sysfs_transport_class_register(void) {
-	return class_register(&iccom_test_transport_class);
+	return class_register(&fd_test_transport_class);
 };
 
 // Unregisters the ICCom class for sysfs
 void iccom_test_sysfs_transport_class_unregister(void) {
-	class_unregister(&iccom_test_transport_class);
+	class_unregister(&fd_test_transport_class);
 };
 
 // Transport device probe which initializes the device
-// and allocates the iccom_test_transport_dev
+// and allocates the fd_test_transport_dev
 //
 // @pdev {valid ptr} transport device
 //
 // RETURNS:
 //      0: ok
 //     <0: errors
-static int iccom_test_transport_probe(struct platform_device *pdev) {
-	struct iccom_test_transport_dev *iccom_test_transport;
+static int fd_test_transport_probe(struct platform_device *pdev) {
+	struct fd_test_transport_dev *fd_test_transport;
 
 	if (IS_ERR_OR_NULL(pdev)) {
 		fd_test_transport_err("Transport test device pdev is null.");
 		return -EFAULT;
 	}
 
-	iccom_test_transport = (struct iccom_test_transport_dev *) 
-		kmalloc(sizeof(struct iccom_test_transport_dev), GFP_KERNEL);
+	fd_test_transport = (struct fd_test_transport_dev *) 
+		kmalloc(sizeof(struct fd_test_transport_dev), GFP_KERNEL);
 
-	if (IS_ERR_OR_NULL(iccom_test_transport)) {
+	if (IS_ERR_OR_NULL(fd_test_transport)) {
 		fd_test_transport_err("Transport test device allocation failed");
 		return -ENOMEM;
 	}
 
-	iccom_test_transport->p = (struct iccom_test_transport_dev_private *)
-		kmalloc(sizeof(struct iccom_test_transport_dev_private), GFP_KERNEL);
+	fd_test_transport->p = (struct fd_test_transport_dev_private *)
+		kmalloc(sizeof(struct fd_test_transport_dev_private), GFP_KERNEL);
 
-	if (IS_ERR_OR_NULL(iccom_test_transport->p)) {
+	if (IS_ERR_OR_NULL(fd_test_transport->p)) {
 		goto no_memory_private_data;
 	}
 
-	iccom_test_transport->duplex_iface = (struct full_duplex_sym_iface *)
+	fd_test_transport->duplex_iface = (struct full_duplex_sym_iface *)
 		kmalloc(sizeof(struct full_duplex_sym_iface), GFP_KERNEL);
 
-	if (IS_ERR_OR_NULL(iccom_test_transport->duplex_iface)) {
+	if (IS_ERR_OR_NULL(fd_test_transport->duplex_iface)) {
 		goto no_memory_full_duplex;
 	}
 
 	/* Full duplex interface definition */
-	iccom_test_transport->duplex_iface->data_xchange = &data_xchange;
-	iccom_test_transport->duplex_iface->default_data_update = &default_data_update;
-	iccom_test_transport->duplex_iface->is_running = &is_running;
-	iccom_test_transport->duplex_iface->init = &init;
-	iccom_test_transport->duplex_iface->reset = &reset;
-	iccom_test_transport->duplex_iface->close = &close;
+	fd_test_transport->duplex_iface->data_xchange = &data_xchange;
+	fd_test_transport->duplex_iface->default_data_update = &default_data_update;
+	fd_test_transport->duplex_iface->is_running = &is_running;
+	fd_test_transport->duplex_iface->init = &init;
+	fd_test_transport->duplex_iface->reset = &reset;
+	fd_test_transport->duplex_iface->close = &close;
 
-	dev_set_drvdata(&pdev->dev, iccom_test_transport);
+	dev_set_drvdata(&pdev->dev, fd_test_transport);
 
 	return 0;
 
 no_memory_private_data:
 	fd_test_transport_err("Transport test device private data allocation failed");
-	kfree(iccom_test_transport);
-	iccom_test_transport = NULL;
+	kfree(fd_test_transport);
+	fd_test_transport = NULL;
 	return -ENOMEM;
 no_memory_full_duplex:
 	fd_test_transport_err("Transport test device full duplex allocation failed");
-	kfree(iccom_test_transport->p);
-	kfree(iccom_test_transport);
-	iccom_test_transport->p  = NULL;
-	iccom_test_transport = NULL;
+	kfree(fd_test_transport->p);
+	kfree(fd_test_transport);
+	fd_test_transport->p  = NULL;
+	fd_test_transport = NULL;
 	return -ENOMEM;
 };
 
 // Transport device remove which deinitialize the device
-// and frees the iccom_test_transport_dev
+// and frees the fd_test_transport_dev
 //
 // @pdev {valid ptr} transport device
 //
 // RETURNS:
 //      0: ok
 //     <0: errors
-static int iccom_test_transport_remove(struct platform_device *pdev) {
-	struct iccom_test_transport_dev *iccom_test_transport;
+static int fd_test_transport_remove(struct platform_device *pdev) {
+	struct fd_test_transport_dev *fd_test_transport;
 
 	if (IS_ERR_OR_NULL(pdev)) {
 		fd_test_transport_err("Transport test device pdev is null.");
 		return -EFAULT;
 	}
 
-	fd_test_transport_warning("Removing a iccom test transport device with id: %d", pdev->id);
+	fd_test_transport_warning("Removing a Full Duplex Test Transport device with id: %d", pdev->id);
 
-	iccom_test_transport = (struct iccom_test_transport_dev *)
+	fd_test_transport = (struct fd_test_transport_dev *)
 						dev_get_drvdata(&pdev->dev);
 
-	if (IS_ERR_OR_NULL(iccom_test_transport)) {
+	if (IS_ERR_OR_NULL(fd_test_transport)) {
 		fd_test_transport_err("Transport test data is null.");
 		return -EFAULT;
 	}
 
-	if (!IS_ERR_OR_NULL(iccom_test_transport->duplex_iface)) {
-		kfree(iccom_test_transport->duplex_iface);
-		iccom_test_transport->duplex_iface = NULL;
+	if (!IS_ERR_OR_NULL(fd_test_transport->duplex_iface)) {
+		kfree(fd_test_transport->duplex_iface);
+		fd_test_transport->duplex_iface = NULL;
 	}
 
-	if(!IS_ERR_OR_NULL(iccom_test_transport->p)) {
-		kfree(iccom_test_transport->p);
-		iccom_test_transport->p = NULL;
+	if(!IS_ERR_OR_NULL(fd_test_transport->p)) {
+		kfree(fd_test_transport->p);
+		fd_test_transport->p = NULL;
 	}
 
-	kfree(iccom_test_transport);
-	iccom_test_transport = NULL;
+	kfree(fd_test_transport);
+	fd_test_transport = NULL;
 
 	return 0;
 }
@@ -1062,9 +1062,9 @@ static int iccom_test_transport_remove(struct platform_device *pdev) {
 // The Transport driver compatible definition
 //
 // @compatible name of compatible driver
-struct of_device_id iccom_test_transport_driver_id[] = {
+struct of_device_id fd_test_transport_driver_id[] = {
 	{
-		.compatible = "iccom_test_transport",
+		.compatible = "fd_test_transport",
 	}
 };
 
@@ -1077,14 +1077,14 @@ struct of_device_id iccom_test_transport_driver_id[] = {
 // @driver::name name of driver
 // @driver::of_match_table compatible driver devices
 // @driver::dev_groups devices groups with all attributes
-struct platform_driver iccom_test_transport_driver = {
-	.probe = iccom_test_transport_probe,
-	.remove = iccom_test_transport_remove,
+struct platform_driver fd_test_transport_driver = {
+	.probe = fd_test_transport_probe,
+	.remove = fd_test_transport_remove,
 	.driver = {
 		.owner = THIS_MODULE,
-		.name = "iccom_test_transport",
-		.of_match_table = iccom_test_transport_driver_id,
-		.dev_groups = iccom_test_transport_dev_groups
+		.name = "fd_test_transport",
+		.of_match_table = fd_test_transport_driver_id,
+		.dev_groups = fd_test_transport_dev_groups
 	}
 };
 
@@ -1100,9 +1100,9 @@ static int __init fd_test_transport_module_init(void)
 {
 	int ret;
 
-	ida_init(&iccom_test_transport_dev_id);
+	ida_init(&fd_test_transport_dev_id);
 
-	ret = platform_driver_register(&iccom_test_transport_driver);
+	ret = platform_driver_register(&fd_test_transport_driver);
 	fd_test_transport_warning("Transport Driver Register result: %d", ret);
 	iccom_test_sysfs_transport_class_register();
 	fd_test_transport_warning("module loaded");
@@ -1119,11 +1119,11 @@ static int __init fd_test_transport_module_init(void)
 //     !0: nok
 static void __exit fd_test_transport_module_exit(void)
 {
-	ida_destroy(&iccom_test_transport_dev_id);
+	ida_destroy(&fd_test_transport_dev_id);
 
 	iccom_test_sysfs_transport_class_unregister();
 
-	platform_driver_unregister(&iccom_test_transport_driver);
+	platform_driver_unregister(&fd_test_transport_driver);
 
 	fd_test_transport_warning("module unloaded");
 }

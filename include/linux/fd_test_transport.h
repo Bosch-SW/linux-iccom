@@ -25,7 +25,7 @@
 
 #include <linux/full_duplex_interface.h>
 
-// This structure is needed for the iccom test transport to hold
+// This structure is needed for the Full Duplex Test Transport to hold
 // all the xfer device internal/private data for the transport
 //
 // @xfer the xfer to execute data
@@ -37,7 +37,7 @@
 //      is running or not
 // @finishing contains the status whether transport
 //      is finishing its work
-struct iccom_test_transport_dev_private {
+struct fd_test_transport_dev_private {
 	struct full_duplex_xfer xfer;
 	bool got_us_data;
 	int next_xfer_id;
@@ -45,15 +45,15 @@ struct iccom_test_transport_dev_private {
 	bool finishing;
 };
 
-// This structure is needed for the iccom test transport to hold
+// This structure is needed for the Full Duplex Test Transport to hold
 // the duplex iface and the xfer device so that it can communicate
 // with iccom to exchange data. It describes the test transport private data
 //
 // @full_duplex_sym_iface {ptr valid} full duplex interface
-// @p {ptr valid} iccom test transport private data
-struct iccom_test_transport_dev {
+// @p {ptr valid} Full Duplex Test Transport private data
+struct fd_test_transport_dev {
 	struct full_duplex_sym_iface * duplex_iface;
-	struct iccom_test_transport_dev_private *p;
+	struct fd_test_transport_dev_private *p;
 };
 
 #define FD_TEST_TRANSPORT_HEADER

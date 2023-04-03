@@ -5354,8 +5354,8 @@ static ssize_t transport_store(
 {
 	struct iccom_dev *iccom = 
 				(struct iccom_dev *)dev_get_drvdata(dev);
-	struct iccom_test_transport_dev * iccom_test_transport = NULL;
-	struct device *iccom_test_transport_device = NULL;
+	struct fd_test_transport_dev * fd_test_transport = NULL;
+	struct device *fd_test_transport_device = NULL;
 	int ret;
 
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
@@ -5390,41 +5390,41 @@ static ssize_t transport_store(
 
 	(void)iccom_test_sysfs_trim_buffer(device_name, count);
 
-	iccom_test_transport_device = 
+	fd_test_transport_device = 
 		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
 	kfree(device_name);
 
-	if (IS_ERR_OR_NULL(iccom_test_transport_device)) {
+	if (IS_ERR_OR_NULL(fd_test_transport_device)) {
 		iccom_err("Transport test device is null.");
 		return -EFAULT;
 	}
 
-	iccom_test_transport = (struct iccom_test_transport_dev *)
-					dev_get_drvdata(iccom_test_transport_device);
+	fd_test_transport = (struct fd_test_transport_dev *)
+					dev_get_drvdata(fd_test_transport_device);
 
-	if (IS_ERR_OR_NULL(iccom_test_transport)) {
+	if (IS_ERR_OR_NULL(fd_test_transport)) {
 		iccom_err("Transport test device data is null.");
 		return -EFAULT;
 	}
 
-	if (IS_ERR_OR_NULL(iccom_test_transport->duplex_iface)) {
+	if (IS_ERR_OR_NULL(fd_test_transport->duplex_iface)) {
 		iccom_err("Transport test device data iface is null.");
 		return -EFAULT;
 	}
 
 	struct device_link *link_downwards = add_device_link_dependency(dev,
-						 iccom_test_transport_device);
+						 fd_test_transport_device);
 
 	if(IS_ERR_OR_NULL(link_downwards)) {
 		iccom_err("Unable to create link for transport device %s",
-							dev_name(iccom_test_transport_device));
+							dev_name(fd_test_transport_device));
 		return -EFAULT;
 	}
 
 	ret = iccom_init_binded(iccom,
-					iccom_test_transport->duplex_iface,
-					(void*)iccom_test_transport_device);
+					fd_test_transport->duplex_iface,
+					(void*)fd_test_transport_device);
 
 	if (ret != 0) {
 		iccom_err("Iccom Init failed with the provided device.");
