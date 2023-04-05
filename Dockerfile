@@ -14,24 +14,49 @@ RUN rm -rf ${repo_path} && mkdir -p ${repo_path}
 WORKDIR ${repo_path}
 COPY . .
 
-# ICCom
-# Build --> Workqueue - use the system WQ 
+##  ICCom Test Builds
+
+# Workqueue - use the system WQ
 RUN make -C ${kernel_source_dir} M=${repo_path} \
-                CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM \
         CONFIG_CHECK_SIGNATURE=n \
-        CONFIG_ICCOM_VERSION=$(git rev-parse HEAD)
+        && rm -rf ${repo_path}/*
+COPY . .
 
-# ICCom
-# Build --> Default
+# Workqueue - use the system high prio WQ
 RUN make -C ${kernel_source_dir} M=${repo_path} \
-                CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM_HIGHPRI \
         CONFIG_CHECK_SIGNATURE=n \
+        && rm -rf ${repo_path}/*
+COPY . .
+
+# Workqueue - use the private highprio WQ
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+        CONFIG_BOSCH_ICCOM=m \
+        CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=PRIVATE \
+        CONFIG_CHECK_SIGNATURE=n \
+        && rm -rf ${repo_path}/*
+COPY . .
+
+# Debug with embedded defaults
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+        CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_DEBUG=y \
+        CONFIG_CHECK_SIGNATURE=n  \
+        && rm -rf ${repo_path}/*
+COPY . .
+
+# Default build
+RUN make -C ${kernel_source_dir} M=${repo_path} \
+        CONFIG_BOSCH_ICCOM=m \
+        CONFIG_CHECK_SIGNATURE=n \
         CONFIG_ICCOM_VERSION=$(git rev-parse HEAD)
 
-# Full Duplex Test Transport
-# Build --> Default
+##  Full Duplex Test Transport Build
+
+# Default build
 RUN make -C ${kernel_source_dir} M=${repo_path} \
                 CONFIG_BOSCH_FD_TEST_TRANSPORT=m
 
@@ -68,6 +93,5 @@ RUN <<EOF
         grep "iccom_test_5.python: PASS" /qemu_run.log                    && \
         grep "iccom_test_6.python: PASS" /qemu_run.log                    && \
         grep "iccom_final_test.python: PASS" /qemu_run.log                && \
-        grep "iccom_test_transport_final_test.python: PASS" /qemu_run.log
-        grep "iccom_test_1.python: PASS" /qemu_run.log
+        grep "fd_test_transport_final_test.python: PASS" /qemu_run.log
 EOF

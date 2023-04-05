@@ -42,15 +42,6 @@
 // size of data acknoledgement xfer in bytes
 #define ICCOM_ACK_XFER_SIZE_BYTES 1
 
-// defines the sysfs enabling value to create the
-// RW files for iccom transport test manipulation
-// via user space
-#define ICCOM_SYSFS_CREATE_RW_FILES 1U
-// defines the sysfs disabling value to remove the
-// RW files for iccom transport test manipulation
-// via user space
-#define ICCOM_SYSFS_REMOVE_RW_FILES 0U
-
 // defines the sysfs create channel character
 // to be used to create channels
 #define ICCOM_SYSFS_CREATE_CHANNEL 'c'
