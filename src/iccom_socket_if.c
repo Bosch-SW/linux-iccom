@@ -527,7 +527,7 @@ static int __iccom_socket_reg_socket_family(
         // TODO: optionally: add support for earlier versions of kernel
         iccom_sk->socket = netlink_kernel_create(&init_net
                                                  , iccom_sk->protocol_family_id
-                                                 , &netlink_cfg);
+                                        , &netlink_cfg);
 
         if (IS_ERR(iccom_sk->socket)) {
                 return PTR_ERR(iccom_sk->socket);
@@ -1144,13 +1144,13 @@ static ssize_t iccom_dev_show(struct device *dev, struct device_attribute *attr,
 	}
 
 	if (IS_ERR_OR_NULL(iccom_sockets_dev->iccom)) {
-		iccom_socket_err("Iccom Sk has no Iccom device \
-				associtated/invalid.");
+		iccom_socket_err("Iccom Sk has no Iccom device "
+				 "associtated/invalid.");
 		goto invalid_input;
 	}
 
-	return scnprintf(buf, PAGE_SIZE, "Iccom Sk has an Iccom device already \
-				associated: %s", kobject_name(&(dev->kobj)));
+	return scnprintf(buf, PAGE_SIZE, "Iccom Sk has an Iccom device already "
+				"associated: %s", kobject_name(&(dev->kobj)));
 
 invalid_input:
 	return scnprintf(buf, PAGE_SIZE, " ");
@@ -1244,8 +1244,8 @@ static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr
 		return -EINVAL;
 	}
 
-	iccom_socket_info("Iccom device binding to Iccom socket device was \
-			   sucessful");
+	iccom_socket_info("Iccom device binding to Iccom socket device was "
+			  "sucessful");
 	return count;
 }
 static DEVICE_ATTR_RW(iccom_dev);
@@ -1277,9 +1277,6 @@ static int iccom_skif_check_protocol_family_availability(struct device *dev,
 	protocol_family = *((int *)data);
 
 	if (protocol_family == iccom_sock_dev->protocol_family_id) {
-		iccom_socket_info("\n Already assigned protocol family %d for "
-				   "socket device %s", protocol_family, 
-				  dev->kobj.name);
 		return 1;
 	}
 	return 0;
@@ -1315,9 +1312,9 @@ static ssize_t protocol_family_store(struct device *dev,
         }*/
 
 	if (iccom_sk_dev->protocol_family_id >= 0) {
-		iccom_socket_err("Protocol family is already assigned to this \
-				  iccom socket interface device (current value \
-				  %d).", iccom_sk_dev->protocol_family_id);
+		iccom_socket_err("Protocol family is already assigned to this "
+				 "iccom socket interface device (current value "
+				 "%d).", iccom_sk_dev->protocol_family_id);
 		return -EPFNOSUPPORT;
 	}
 
@@ -1332,7 +1329,8 @@ static ssize_t protocol_family_store(struct device *dev,
 
 	ret = kstrtouint(buf, 10, &protocol_family);
 	if (ret != 0) {
-		iccom_socket_err("Specified protocol family %s is invalid (error:%d)", 
+		iccom_socket_err("Specified protocol family %s is invalid "
+				 "(error:%d)", 
 			buf, ret);
 		return -EINVAL;
 	}
@@ -1340,8 +1338,9 @@ static ssize_t protocol_family_store(struct device *dev,
 	ret = driver_for_each_device(dev->driver, NULL, &protocol_family, 
 				&iccom_skif_check_protocol_family_availability);
 	if (ret != 0) {
-		iccom_socket_err("Specified protocol family %s is already in use. "
-			"Please use a different one. (ret: %d)", buf, ret);
+		iccom_socket_err("Specified protocol family %s is already in "
+				 "use. Please use a different one. (ret: %d)", 
+				 buf, ret);
 		return -EINVAL;
 	}
 
@@ -1358,6 +1357,133 @@ static struct attribute *iccom_socket_if_dev_attrs[] = {
 };
 
 ATTRIBUTE_GROUPS(iccom_socket_if_dev);
+
+static int iccom_skif_find_unused_protocol_family(struct platform_device *pdev)
+{
+	int ret = 0;
+
+	for (int ptc_fam = NETLINK_ICCOM; ptc_fam < 255; ptc_fam++) { //TODO: MAX VALUE???
+		ret = driver_for_each_device(pdev->dev.driver, NULL, &ptc_fam, 
+				&iccom_skif_check_protocol_family_availability);
+		if (!ret) {
+			iccom_socket_info("Found available protocol family %d",
+					ptc_fam);
+			return ptc_fam;
+		}
+	}
+	return PROTOCOL_FAMILY_RESET_VALUE;
+}
+
+static int iccom_skif_validate_protocol_family(struct platform_device *pdev, 
+							int *protocol_family)
+{
+	if (IS_ERR_OR_NULL(pdev) || IS_ERR_OR_NULL(protocol_family)) {
+		iccom_socket_err("Invalid parameters to validate protocol "
+				 "family");
+		return -EINVAL;
+	}
+
+	if (*protocol_family == PROTOCOL_FAMILY_RESET_VALUE) {
+		iccom_socket_warning("Protocol family property is not defined "
+				     "or does not have a value");
+		*protocol_family = iccom_skif_find_unused_protocol_family(pdev);
+		if (*protocol_family == PROTOCOL_FAMILY_RESET_VALUE) {
+			iccom_socket_err("Failed to get available protocol "
+					 "family");
+			return -EPFNOSUPPORT;
+		}
+
+		iccom_socket_info("Setting a new protocol family value %d "
+				  "to device %s", *protocol_family, 
+				  pdev->dev.kobj.name);
+		return 0;
+	} else if (*protocol_family < NETLINK_ICCOM) {
+		iccom_socket_err("Protocol family property has a not supported "
+				 "netlink value (shall be greater than or "
+				 "equal to %d)", NETLINK_ICCOM);
+		return -EINVAL;
+	}
+
+	int ret = 0;
+	ret = driver_for_each_device(pdev->dev.driver, NULL, protocol_family, 
+				&iccom_skif_check_protocol_family_availability);
+	if (ret) {
+		iccom_socket_err("Specified protocol family %s is already in "
+				 "use or is invalid . Please use a different "
+				 "one. (ret: %d)", ret);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int iccom_skif_device_tree_node_setup(struct platform_device *pdev, 
+				struct iccom_sockets_device *iccom_skif_dev_data)
+{
+	iccom_socket_info("Probing an Iccom Socket via DT");
+
+	struct device_node *iccom_sk_dt_node = pdev->dev.of_node;
+	
+	int ret = 0;
+	ret = of_property_read_u32(iccom_sk_dt_node, "protocol_family", 
+				&iccom_skif_dev_data->protocol_family_id);
+	if (ret == -EOVERFLOW) {
+		iccom_socket_err("Protocol family property has invalid value: "
+				 "%d", ret);
+		return -EINVAL;
+	}
+	ret = iccom_skif_validate_protocol_family(pdev,
+				&(iccom_skif_dev_data->protocol_family_id));
+	if (ret) {
+		iccom_socket_err("Unable to validate or find valid protocol "
+				 "family property: %d", ret);
+		return -EINVAL;
+	}
+
+	struct device_node *iccom_dt_node = of_parse_phandle(iccom_sk_dt_node, 
+								"iccom_dev", 0);
+	if (IS_ERR_OR_NULL(iccom_dt_node)) {
+		iccom_socket_err("Iccom_dev property is not defined or valid");
+		return -EINVAL;
+	}
+
+	struct platform_device *iccom_pdev = 
+				of_find_device_by_node(iccom_dt_node);
+	of_node_put(iccom_dt_node);
+	if (IS_ERR_OR_NULL(iccom_pdev)) {
+		iccom_socket_err("Unable to find Iccom from specified node");
+		return -ENODEV;
+	}
+	//TODO: check compatibility of iccom device driver ?
+
+	struct device_link* link = device_link_add(&pdev->dev, 
+			&iccom_pdev->dev, DL_FLAG_AUTOREMOVE_CONSUMER);
+	if (IS_ERR_OR_NULL(link)) {
+		iccom_socket_err("Unable to bind iccom sk to specified iccom");
+		return -EINVAL;
+	}
+
+	struct iccom_dev *iccom_dev_data = (struct iccom_dev *) 
+				dev_get_drvdata(&iccom_pdev->dev);
+	if (IS_ERR_OR_NULL(iccom_dev_data)) {
+		device_link_del(link);
+		iccom_skif_reset_data(iccom_skif_dev_data);
+		iccom_socket_err("Unable to get Iccom device specified by "
+				 "device tree node");
+		return -EPROBE_DEFER;
+	}
+
+	iccom_skif_dev_data->iccom = iccom_dev_data;
+
+	ret = iccom_skif_run(iccom_skif_dev_data);
+	if (ret != 0) {
+		device_link_del(link);
+		iccom_skif_reset_data(iccom_skif_dev_data);
+		iccom_socket_err("Iccom sk if device run failed");
+		return -EINVAL;
+	}
+	return 0;
+}
 
 // iccom_sk_sysfs_init - registers the ICCOM Socket IF class for sysfs
 //
@@ -1391,8 +1517,7 @@ void iccom_socket_sysfs_destroy(void)
 static int iccom_socket_if_probe(struct platform_device *pdev)
 {
 	if (IS_ERR_OR_NULL(pdev)) {
-		iccom_socket_err("Probing a Iccom Socket Device failed - \
-					NULL pointer!");
+		iccom_socket_err("Probing a Iccom Socket Device failed: NULL");
 		return -EINVAL;
 	}
 
@@ -1403,23 +1528,35 @@ static int iccom_socket_if_probe(struct platform_device *pdev)
 	iccom_skif_dev_data = (struct iccom_sockets_device *)
 				 kzalloc(sizeof(struct iccom_sockets_device), 
 					  GFP_KERNEL);
-
 	if (IS_ERR_OR_NULL(iccom_skif_dev_data)) {
-		iccom_socket_err("Probing a Iccom Socket Device failed - \
-					no available space!");
+		iccom_socket_err("Probing a Iccom Socket Device failed: no "
+				 "available space");
 		return -ENOMEM;
 	}
-	int ret;
 
+	int ret;
 	ret = iccom_skif_init(iccom_skif_dev_data);
 	if (ret < 0) {
-		iccom_socket_err("Iccom sk init failed when probing");
-		return -EINVAL;
+		iccom_socket_err("Failed when probing: %d", 
+				ret);
+		goto free_iccom_skif_data;
 	}
 
+	if (!IS_ERR_OR_NULL(pdev->dev.of_node)) {
+		ret = iccom_skif_device_tree_node_setup(pdev, iccom_skif_dev_data);
+		if (ret != 0) {
+			iccom_socket_err("Unable to setup device tree node: %d",
+					ret);
+			goto free_iccom_skif_data;
+		}
+	}
 	dev_set_drvdata(&pdev->dev, iccom_skif_dev_data);
 
 	return 0;
+
+free_iccom_skif_data:
+	kfree(iccom_skif_dev_data);
+	return ret;
 }
 
 // iccom_socket_if_remove - remove existing device
