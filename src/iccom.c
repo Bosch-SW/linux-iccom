@@ -1239,6 +1239,7 @@ static void __iccom_package_free(struct iccom_package *package)
 	package->data = NULL;
 	list_del(&package->list_anchor);
 	kfree(package);
+	package = NULL;
 }
 
 // Helper. Finishes the creation of the package.
@@ -1624,8 +1625,10 @@ static void __iccom_message_free(struct iccom_message *msg)
 	list_del(&(msg->list_anchor));
 	if (!IS_ERR_OR_NULL(msg->data)) {
 		kfree(msg->data);
+		msg->data = NULL;
 	}
 	kfree(msg);
+	msg = NULL;
 }
 
 // Helper. Returns if the message is ready
@@ -1806,6 +1809,7 @@ static void __iccom_msg_storage_free_channel(
 
 	list_del(&(channel_rec->channel_anchor));
 	kfree(channel_rec);
+	channel_rec = NULL;
 
 	return;
 }
@@ -1849,23 +1853,9 @@ struct iccom_message * __iccom_message_data_clone(
 	dst->priority = src->priority;
 	dst->finalized = src->finalized;
 	dst->uncommitted_length = src->uncommitted_length;
-
+	INIT_LIST_HEAD(&dst->list_anchor);
+	
 	return dst;
-}
-
-// Free an sysfs iccom message complety
-//
-// @msg {valid prt} iccom message to be freed
-void iccom_test_sysfs_ch_msg_free(struct iccom_message *msg)
-{
-	if (IS_ERR_OR_NULL(msg)) {
-		return;
-	}
-
-	if (!IS_ERR_OR_NULL(msg->data)) {
-		kfree(msg->data);
-	}
-	kfree(msg);
 }
 
 // Routine to store an iccom message for
@@ -1953,6 +1943,7 @@ ssize_t iccom_test_sysfs_ch_enqueue_msg(
 
 iccom_msg_clone_failed:
 	kfree(ch_msg_entry);
+	ch_msg_entry = NULL;
 finalize:
 	mutex_unlock(&iccom->p->sysfs_test_ch_lock);
 	return error_result;
@@ -2712,6 +2703,7 @@ void iccom_msg_storage_collect_garbage(
 		if (iccom_msg_storage_channel_has_no_data(channel_rec)) {
 			list_del(&channel_rec->channel_anchor);
 			kfree(channel_rec);
+			channel_rec = NULL;
 		}
 		if (next == &storage->channels_list) {
 			break;
@@ -2858,7 +2850,8 @@ int iccom_msg_storage_append_data_to_message(
 	msg->uncommitted_length = new_data_length;
 	mutex_unlock(&storage->lock);
 	kfree(old_data);
-
+	old_data = NULL;
+	
 	if (final) {
 		msg->finalized = true;
 		__sync_add_and_fetch(&storage->uncommitted_finalized_count, 1);
@@ -3378,6 +3371,7 @@ static int __iccom_enqueue_new_tx_data_package(struct iccom_dev *iccom)
 	if (res < 0) {
 		iccom_err("no memory for new package");
 		kfree(new_package);
+		new_package = NULL;
 		return res;
 	}
 
@@ -3744,6 +3738,7 @@ static struct iccom_message *__iccom_construct_message_in_storage(
 	if (iccom_msg_storage_push_message(&iccom->p->rx_messages
 					   , msg) != 0) {
 		kfree(msg);
+		msg = NULL;
 		return NULL;
 	}
 	return msg;
@@ -4228,7 +4223,7 @@ static inline void __iccom_free_packages_storage(struct iccom_dev *iccom)
 //      <0 : negated error code if fails.
 __maybe_unused
 int iccom_post_message(struct iccom_dev *iccom
-		, char *data, const size_t length
+		, const char *data, const size_t length
 		, unsigned int channel
 		, unsigned int priority)
 {
@@ -4497,6 +4492,7 @@ int iccom_read_message(struct iccom_dev *iccom
 	}
 
 	kfree(msg);
+	msg = NULL;
 	return 0;
 }
 
@@ -4944,7 +4940,7 @@ void iccom_test_sysfs_ch_msg_del_entry(
 		return;
 	}
 	if (!IS_ERR_OR_NULL(ch_msg_entry->msg)) {
-		iccom_test_sysfs_ch_msg_free(ch_msg_entry->msg);
+		__iccom_message_free(ch_msg_entry->msg);
 	}
 	list_del(&ch_msg_entry->list);
 }
@@ -5279,6 +5275,7 @@ static ssize_t delete_iccom_store(
 		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
 	kfree(device_name);
+	device_name = NULL;
 
 	if (IS_ERR_OR_NULL(platform_device)) {
 		iccom_err("Iccom device is null.");
@@ -5291,6 +5288,7 @@ static ssize_t delete_iccom_store(
 
 clean_up_device_name_buffer_memory:
 	kfree(device_name);
+	device_name = NULL;
 	return -EFAULT;
 }
 
@@ -5406,6 +5404,7 @@ static ssize_t transport_store(
 		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
 	kfree(device_name);
+	device_name = NULL;
 
 	if (IS_ERR_OR_NULL(platform_device)) {
 		iccom_err("Transport test device is null.");
@@ -5449,6 +5448,7 @@ static ssize_t transport_store(
 
 clean_up_device_name_buffer_memory:
 	kfree(device_name);
+	device_name = NULL;
 	return -EFAULT;
 }
 

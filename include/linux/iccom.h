@@ -92,7 +92,7 @@ struct iccom_dev {
 /* ---------------for documentation, see iccom.c file -------------------*/
 
 int iccom_post_message(struct iccom_dev *iccom
-                , char *data, const size_t length
+                , const char *data, const size_t length
                 , unsigned int channel
                 , unsigned int priority);
 int iccom_flush(struct iccom_dev *iccom);
