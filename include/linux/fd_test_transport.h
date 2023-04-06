@@ -36,8 +36,6 @@
 // via user space
 #define FD_TT_SYSFS_REMOVE_RW_FILES 0U
 
-
-
 #define FD_TEST_TRANSPORT_HEADER
 
 #endif //FD_TEST_TRANSPORT_HEADER

@@ -32,6 +32,8 @@
 
 /* ------------- BUILD CONFIGURATION ------------- */
 
+#define FD_TT_VERBOSITY 3
+
 #define FD_TT_LOG_PREFIX "FD Test Transport: "
 
 /* ------------- GENERAL CONFIGURATION -------------*/
@@ -43,12 +45,78 @@
     #define pr_warning pr_warn
 #endif
 
+#if FD_TT_VERBOSITY >= 1
 #define fd_tt_err(fmt, ...)						\
-	pr_err(FD_TT_LOG_PREFIX"%s: "fmt"\n", __func__			\
-			, ##__VA_ARGS__)
+	pr_err(FD_TT_LOG_PREFIX"%s: "fmt"\n", __func__, ##__VA_ARGS__)
+#define fd_tt_err_raw(fmt, ...)						\
+	pr_err(FD_TT_LOG_PREFIX""fmt"\n", ##__VA_ARGS__)
+#else
+#define fd_tt_err(fmt, ...)
+#define fd_tt_err_raw(fmt, ...)
+#endif
+
+#if FD_TT_VERBOSITY >= 2
 #define fd_tt_warning(fmt, ...)						\
 	pr_warning(FD_TT_LOG_PREFIX"%s: "fmt"\n", __func__		\
-			, ##__VA_ARGS__)
+		   , ##__VA_ARGS__)
+#define fd_tt_warning_raw(fmt, ...)					\
+	pr_warning(FD_TT_LOG_PREFIX""fmt"\n", ##__VA_ARGS__)
+#else
+#define fd_tt_warning(fmt, ...)
+#define fd_tt_warning_raw(fmt, ...)
+#endif
+
+#if FD_TT_VERBOSITY >= 3
+#define fd_tt_info_helper(fmt, ...)					\
+	pr_info(FD_TT_LOG_PREFIX"%s: "fmt"\n", __func__, ##__VA_ARGS__)
+#define fd_tt_info_raw_helper(fmt, ...)					\
+	pr_info(FD_TT_LOG_PREFIX""fmt"\n", ##__VA_ARGS__)
+#define fd_tt_info_helper_0(fmt, ...)					\
+	fd_tt_info_helper(fmt, ##__VA_ARGS__)
+#define fd_tt_info_raw_helper_0(fmt, ...)				\
+	fd_tt_info_raw_helper(fmt, ##__VA_ARGS__)
+#else
+#define fd_tt_info_helper(fmt, ...)
+#define fd_tt_info_raw_helper(fmt, ...)
+#define fd_tt_info_helper_0(fmt, ...)
+#define fd_tt_info_raw_helper_0(fmt, ...)
+#endif
+
+#if FD_TT_VERBOSITY >= 4
+#define fd_tt_info_helper_1(fmt, ...)					\
+	fd_tt_info_helper(fmt, ##__VA_ARGS__)
+#define fd_tt_info_raw_helper_1(fmt, ...)				\
+	fd_tt_info_raw_helper(fmt, ##__VA_ARGS__)
+#else
+#define fd_tt_info_helper_1(fmt, ...)
+#define fd_tt_info_raw_helper_1(fmt, ...)
+#endif
+
+#if FD_TT_VERBOSITY >= 5
+#define fd_tt_info_helper_2(fmt, ...)					\
+	fd_tt_info_helper(fmt, ##__VA_ARGS__)
+#define fd_tt_info_raw_helper_2(fmt, ...)				\
+	fd_tt_info_raw_helper(fmt, ##__VA_ARGS__)
+#else
+#define fd_tt_info_helper_2(fmt, ...)
+#define fd_tt_info_raw_helper_2(fmt, ...)
+#endif
+
+// information messages levels
+#define FD_TT_LOG_INFO_KEY_LEVEL 0
+#define FD_TT_LOG_INFO_OPT_LEVEL 1
+#define FD_TT_LOG_INFO_DBG_LEVEL 2
+
+#define fd_tt_info_helper__(level, fmt, ...)				\
+	fd_tt_info_helper_##level(fmt, ##__VA_ARGS__)
+#define fd_tt_info_raw_helper__(level, fmt, ...)			\
+	fd_tt_info_raw_helper_##level(fmt, ##__VA_ARGS__)
+
+#define fd_tt_info(level, fmt, ...)					\
+	fd_tt_info_helper__(level, fmt, ##__VA_ARGS__)
+#define fd_tt_info_raw(level, fmt, ...)					\
+	fd_tt_info_raw_helper__(level, fmt, ##__VA_ARGS__)
+
 #define FD_TT_GET_FULL_DUPLEX_DEVICE(dev)				\
 	struct full_duplex_device * full_duplex_dev =			\
 		(struct full_duplex_device *) dev_get_drvdata(dev);
@@ -209,6 +277,10 @@ void fd_tt_xfer_free(struct full_duplex_xfer *xfer)
 // @xfer_device {valid ptr} xfer device
 // @data_transport_to_iccom {array} data from userspace to be copied
 // @data_transport_to_iccom_size {number} size of data to be copied
+//
+// NOTE: The input array is copied into the xfer_device but the
+//       array ownership remains in the caller which shall be responsible
+//       to free the memory.
 //
 // RETURNS:
 //      0: ok
@@ -856,11 +928,9 @@ static ssize_t showRW_ctl_store(
 		return -EINVAL;
 	}
 	
-	struct kernfs_node* knode_R = sysfs_get_dirent(dev->kobj.sd,"R");
-	struct kernfs_node* knode_W = sysfs_get_dirent(dev->kobj.sd,"W");
-
-	if (result == FD_TT_SYSFS_CREATE_RW_FILES) {
-		if (!IS_ERR_OR_NULL(knode_R) || !IS_ERR_OR_NULL(knode_W)) {
+	if (result == FD_TT_SYSFS_CREATE_RW_FILES) {	
+		if (!IS_ERR_OR_NULL(sysfs_get_dirent(dev->kobj.sd,"R")) ||
+			 !IS_ERR_OR_NULL(sysfs_get_dirent(dev->kobj.sd,"W"))) {
 			fd_tt_err("Files already exist");
 			return -EINVAL;
 		}
@@ -876,11 +946,6 @@ static ssize_t showRW_ctl_store(
 			return -EINVAL;
 		}
 	} else if (result == FD_TT_SYSFS_REMOVE_RW_FILES) {
-		if (IS_ERR_OR_NULL(knode_R) || IS_ERR_OR_NULL(knode_W)) {
-			fd_tt_err("Files do not exist");
-			return -EFAULT;
-		}
-
 		device_remove_file(dev,&dev_attr_R);
 		device_remove_file(dev,&dev_attr_W);
 	} else {
@@ -942,6 +1007,7 @@ static ssize_t create_transport_store(
 	if (IS_ERR_OR_NULL(new_pdev)) {
 		fd_tt_err("Could not register the device fd_test_transport.%d",
 								device_id);
+		ida_free(&fd_test_transport_dev_id, device_id);
 		return -EFAULT;
 	}
 
@@ -957,6 +1023,13 @@ static CLASS_ATTR_WO(create_transport);
 // @attr {valid ptr} device attribute properties
 // @buf {valid ptr} buffer to read input from user space
 // @count {number} size of buffer from user space
+//
+// NOTE: Whenever there is an iccom device using
+//       the fd_test_transport via a link dependency
+//       we do not allow the userspace to destroy the
+//       device in any condition. The userspace creates
+//       fd_test_transport devices manually and he is
+//       responsible to destroy them in the end.
 //
 // RETURNS:
 //  count: ok
@@ -1067,15 +1140,14 @@ void fd_tt_sysfs_transport_class_unregister(void)
 //     <0: errors
 static int fd_tt_probe(struct platform_device *pdev)
 {
-	struct full_duplex_device *full_duplex_dev;
-
 	if (IS_ERR_OR_NULL(pdev)) {
 		fd_tt_err("Transport test device pdev is null.");
 		return -EFAULT;
 	}
 
-	full_duplex_dev = (struct full_duplex_device *) 
-		kmalloc(sizeof(struct full_duplex_device), GFP_KERNEL);
+	struct full_duplex_device * full_duplex_dev = 
+		(struct full_duplex_device *) 
+			kmalloc(sizeof(struct full_duplex_device), GFP_KERNEL);
 
 	FD_TT_CHECK_FULL_DUPLEX_DEVICE("device allocation failed",
 							return -ENOMEM);
@@ -1094,22 +1166,21 @@ static int fd_tt_probe(struct platform_device *pdev)
 	full_duplex_dev->iface = &full_duplex_dev_iface;
 
 	dev_set_drvdata(&pdev->dev, full_duplex_dev);
-
+	
+	fd_tt_info(FD_TT_LOG_INFO_DBG_LEVEL,
+			"Successfully probed the Full Duplex"
+			" Test Transport device with id: %d", pdev->id);
 	return 0;
-
-no_memory_full_duplex:
-	fd_tt_err("Transport test device full duplex allocation failed");
-	kfree(full_duplex_dev->dev);
-	kfree(full_duplex_dev);
-	full_duplex_dev->dev  = NULL;
-	full_duplex_dev = NULL;
-	return -ENOMEM;
 };
 
 // Transport device remove which deinitialize the device
 // and frees the full_duplex_device
 //
 // @pdev {valid ptr} transport device
+//
+// TODO: Introduce proper device linking to guarantee proper
+//       removal. Expectation for now is that nobody is using
+//       the device when this is called.
 //
 // RETURNS:
 //      0: ok
@@ -1118,17 +1189,21 @@ static int fd_tt_remove(struct platform_device *pdev)
 {
 
 	if (IS_ERR_OR_NULL(pdev)) {
-		fd_tt_err("Transport test device pdev is null.");
+		fd_tt_warning("Transport test device pdev is null.");
 		return -EFAULT;
 	}
 
-	fd_tt_warning("Removing a Full Duplex Test Transport "
-				"device with id: %d", pdev->id);
+	fd_tt_info(FD_TT_LOG_INFO_DBG_LEVEL,
+			"Removing a Full Duplex Test Transport "
+			"device with id: %d", pdev->id);
 
 	struct full_duplex_device *full_duplex_dev = 
 			(struct full_duplex_device *) dev_get_drvdata(&pdev->dev);
 
-	FD_TT_CHECK_FULL_DUPLEX_DEVICE("", return -ENODEV);
+	FD_TT_CHECK_FULL_DUPLEX_DEVICE("full duplex device is null"
+					" when trying to remove the"
+					" platform device."
+					, return -ENODEV);
 
 	if (!IS_ERR_OR_NULL(full_duplex_dev->iface)) {
 		full_duplex_dev->iface = NULL;
@@ -1142,6 +1217,9 @@ static int fd_tt_remove(struct platform_device *pdev)
 	kfree(full_duplex_dev);
 	full_duplex_dev = NULL;
 
+	fd_tt_info(FD_TT_LOG_INFO_DBG_LEVEL,
+			"Successfully removed the Full Duplex"
+			" Test Transport device with id: %d", pdev->id);
 	return 0;
 }
 
@@ -1175,43 +1253,39 @@ struct platform_driver fd_tt_driver = {
 };
 
 // Module init method to register
-// the ICCom and transport drivers
-// as well as to initialize the id
-// generators and the crc32 table
+// the full duplex test transport driver
+// and the sysfs class
 //
 // RETURNS:
 //      0: ok
 //     !0: nok
 static int __init fd_tt_module_init(void)
 {
-	int ret;
-
 	ida_init(&fd_test_transport_dev_id);
 
-	ret = platform_driver_register(&fd_tt_driver);
-	fd_tt_warning("Transport Driver Register result: %d", ret);
+	int ret = platform_driver_register(&fd_tt_driver);
+	
+	if (ret != 0) {
+		fd_tt_err("Transport Driver Register failed : %d", ret);
+		return ret;
+	}
+
 	fd_tt_sysfs_transport_class_register();
-	fd_tt_warning("module loaded");
-	return ret;
+	return 0;
 }
 
 // Module exit method to unregister
-// the ICCom and transport drivers
-// as well as to deinitialize the id
-// generators
+// the full duplex test transport driver
+// and the sysfs class and destroy the ida
 //
 // RETURNS:
 //      0: ok
 //     !0: nok
 static void __exit fd_tt_module_exit(void)
 {
-	ida_destroy(&fd_test_transport_dev_id);
-
 	fd_tt_sysfs_transport_class_unregister();
-
 	platform_driver_unregister(&fd_tt_driver);
-
-	fd_tt_warning("module unloaded");
+	ida_destroy(&fd_test_transport_dev_id);
 }
 
 module_init(fd_tt_module_init);

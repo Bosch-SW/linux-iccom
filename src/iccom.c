@@ -484,8 +484,7 @@ struct iccom_test_sysfs_channel {
 // received from iccom to upper layer which
 // will be read by user space later in time
 //
-// @data {ptr valid} contains the message received from iccom
-// @size {number} number of characters in the message
+// @msg {ptr valid} contains the message received from iccom
 // @list list_head for pointing to next previous message
 struct iccom_test_sysfs_channel_msg {
 	struct iccom_message *msg;
@@ -537,7 +536,7 @@ struct iccom_test_sysfs_channel_msg {
 struct iccom_message {
 	struct list_head list_anchor;
 
-	char *data;
+	uint8_t *data;
 	size_t length;
 	unsigned int channel;
 	unsigned int id;
@@ -1811,27 +1810,36 @@ static void __iccom_msg_storage_free_channel(
 	return;
 }
 
-// Deep copies an iccom message and validates
-// whether the deep copy was sucessful
+// Clones an iccom message and returns
+// the new iccom message which has been
+// allocated within this function
 //
 // @src {valid prt} iccom message to be copied
-// @dest {valid prt} iccom message to copy to
 //
 // RETURNS:
-//      0: ok
-//     <0: errors
-ssize_t __iccom_message_deep_copy(
-		struct iccom_message *src,
-		struct iccom_message *dst)
+//  != NULL: pointer to iccom_message newly created
+//     NULL: Failed to clone
+struct iccom_message * __iccom_message_data_clone(
+		struct iccom_message *src)
 {
-	if (IS_ERR_OR_NULL(src) || IS_ERR_OR_NULL(dst)) {
-		return -EINVAL;
+	if (IS_ERR_OR_NULL(src)) {
+		iccom_err("Iccom message is null cannot clone.");
+		return NULL;
+	}
+	struct iccom_message *dst = (struct iccom_message *)
+					kmalloc(sizeof(struct iccom_message), GFP_KERNEL);
+	if (IS_ERR_OR_NULL(dst)) {
+		iccom_err("No memory to create iccom message.");
+		return NULL;
 	}
 
-	dst->data = (char *) kzalloc(src->length, GFP_KERNEL);
+	dst->data = (uint8_t *) kzalloc(src->length, GFP_KERNEL);
 
 	if (IS_ERR_OR_NULL(dst->data)) {
-		return -ENOMEM;
+		iccom_err("No memory to create the data within iccom message.");
+		kfree(dst);
+		dst = NULL;
+		return NULL;
 	}
 
 	memcpy(dst->data, src->data, src->length);
@@ -1842,7 +1850,7 @@ ssize_t __iccom_message_deep_copy(
 	dst->finalized = src->finalized;
 	dst->uncommitted_length = src->uncommitted_length;
 
-	return 0;
+	return dst;
 }
 
 // Free an sysfs iccom message complety
@@ -1923,20 +1931,14 @@ ssize_t iccom_test_sysfs_ch_enqueue_msg(
 			goto finalize;
 		}
 
-		ch_msg_entry->msg = (struct iccom_message *)
-					kmalloc(sizeof(struct iccom_message), GFP_KERNEL);
+		ch_msg_entry->msg = __iccom_message_data_clone(msg);
 		if (IS_ERR_OR_NULL(ch_msg_entry->msg)) {
-			error_result = -ENOMEM;
-			goto iccom_msg_allocation_failed;
-		}
-
-		ch_entry->num_msgs++;
-		error_result = __iccom_message_deep_copy(msg, ch_msg_entry->msg);
-		if (error_result != 0) {
-			goto iccom_msg_deep_copy_failed;
+			error_result = -EFAULT;
+			goto iccom_msg_clone_failed;
 		}
 
 		list_add(&ch_msg_entry->list, &ch_entry->sysfs_ch_msgs_head);
+		ch_entry->num_msgs++;
 		enqueue_msg_status = true;
 		break;
 	}
@@ -1949,9 +1951,7 @@ ssize_t iccom_test_sysfs_ch_enqueue_msg(
 	}
 	return 0;
 
-iccom_msg_deep_copy_failed:
-	iccom_test_sysfs_ch_msg_free(ch_msg_entry->msg);
-iccom_msg_allocation_failed:
+iccom_msg_clone_failed:
 	kfree(ch_msg_entry);
 finalize:
 	mutex_unlock(&iccom->p->sysfs_test_ch_lock);
@@ -5226,6 +5226,7 @@ static ssize_t create_iccom_store(
 
 	if (IS_ERR_OR_NULL(new_pdev)) {
 		iccom_err("Could not register the device iccom.%d",device_id);
+		ida_free(&iccom_dev_id, device_id);
 		return -EFAULT;
 	}
 
@@ -5875,9 +5876,9 @@ struct platform_driver iccom_driver = {
 };
 
 // Module init method to register
-// the ICCom and transport drivers
-// as well as to initialize the id
-// generators and the crc32 table
+// the full duplex test transport driver
+// and the sysfs class and generate the
+// crc32 table
 //
 // RETURNS:
 //      0: ok
@@ -5900,9 +5901,8 @@ static int __init iccom_module_init(void)
 }
 
 // Module exit method to unregister
-// the ICCom and transport drivers
-// as well as to deinitialize the id
-// generators
+// the ICCom driver and the sysfs 
+// class and destroy the ida
 //
 // RETURNS:
 //      0: ok

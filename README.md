@@ -427,27 +427,26 @@ Sysfs functionalities include:
 
 ![ICCom Sysfs Structure](docs/assets/iccom_sysfs_structure.png)
 
-Create ICCom devices
+Create/Delete ICCom devices
 ```
-# Run the command multiple times to create successive iccom devices
-
-# /sys/devices/platform/iccom.0
+# Create /sys/devices/platform/iccom.0
 sudo sh -c "echo > /sys/class/iccom/create_iccom"
 
-# /sys/devices/platform/iccom.1
-sudo sh -c "echo > /sys/class/iccom/create_iccom"
+# Delete /sys/devices/platform/iccom.0
+sudo sh -c "echo iccom.0 > /sys/class/iccom/delete_iccom"
 ```
 
 Create Full Duplex Test Transport devices
 ```
-# Run the command multiple times to create successive Full Duplex Test Transport devices
+# Create /sys/devices/platform/fd_test_transport.0
+sudo sh -c "echo > /sys/class/fd_test_transport/create_transport"
 
-# /sys/devices/platform/fd_test_transport.0
-sudo sh -c "echo > /sys/class/iccom/create_transport"
+# Delete /sys/devices/platform/fd_test_transport.0
+sudo sh -c "echo fd_test_transport.0 > /sys/class/fd_test_transport/delete_transport"
+```
 
-# /sys/devices/platform/fd_test_transport.1
-sudo sh -c "echo > /sys/class/iccom/create_transport"
 Link Full Duplex Test Transport to iccom devices
+```
 # link fd_test_transport.0 to iccom.0
 sudo sh -c "echo fd_test_transport.0 > /sys/devices/platform/iccom.0/transport"
 ```
