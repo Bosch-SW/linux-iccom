@@ -874,7 +874,6 @@ static void __iccom_socket_protocol_device_close(
                 return;
         }
         iccom_sk->exiting = true;
-        iccom_close_binded(&iccom_sk->iccom);
 }
 
 // Inits underlying protocol layer.
@@ -885,24 +884,6 @@ static void __iccom_socket_protocol_device_close(
 static int __iccom_socket_protocol_device_init(
                 struct iccom_sockets_device *iccom_sk)
 {
-        // TODO: remove this dependency
-        //      it is only used in the migration phase; later all
-        //      drivers binding shall happen in the ultimate protocol driver
-        // TODO: iccom_socket_if shall only provide the message sockets
-        //      functionality and have no dependencies on the message
-        //      transport protocol drivers, nor byte transfer protocol
-        //      drivers
-        const struct full_duplex_device transport
-                    = example_protocol_init_transport_layer();
-
-        // TODO: ultimate binding shall happen in the ultimate protocol
-        //      driver and happen between specific instances of layers
-        //      (not between whole layers).
-        int res = iccom_init_binded(&iccom_sk->iccom, transport.iface
-                                    , transport.dev);
-        if (res < 0) {
-                return res;
-        }
         res = iccom_set_channel_callback(&iccom_sk->iccom
                         , ICCOM_ANY_CHANNEL_VALUE
                         , &__iccom_socket_msg_rx_callback

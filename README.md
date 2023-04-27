@@ -285,13 +285,8 @@ int iccom_read_message(struct iccom_dev *iccom
                 , unsigned int *msg_id__out);
 void iccom_print_statistics(struct iccom_dev *iccom);
 int iccom_init(struct iccom_dev *iccom);
-int iccom_startup(struct iccom_dev *iccom);
-void iccom_close(struct iccom_dev *iccom);
-int iccom_init_binded(
-                struct iccom_dev *iccom
-                , const struct full_duplex_sym_iface *const full_duplex_if
-                , void *full_duplex_device);
-void iccom_close_binded(struct iccom_dev *iccom);
+int iccom_start(struct iccom_dev *iccom);
+void iccom_delete(struct iccom_dev *iccom);
 bool iccom_is_running(struct iccom_dev *iccom);
 ```
 The ICCom Socket IF driver uses the API above to provide a socket
@@ -451,7 +446,7 @@ Link Full Duplex Test Transport to iccom devices
 sudo sh -c "echo fd_test_transport.0 > /sys/devices/platform/iccom.0/transport"
 ```
 
-Create ICCom channel
+Create ICCom testing channel
 ```
 # Run the command as "echo cX (...)" (X is the channel's id number) to create an iccom channel with id = X
 
@@ -462,7 +457,7 @@ sudo sh -c "echo c1 > /sys/devices/platform/iccom.0/channels_ctl"
 sudo sh -c "echo c2 > /sys/devices/platform/iccom.0/channels_ctl"
 ```
 
-Destroy ICCom channel
+Destroy ICCom testing channel
 ```
 # Run the command as "echo dX (...)" (X is the channel's id number) to destroy the existing iccom channel with id = X
 

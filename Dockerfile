@@ -14,7 +14,7 @@ RUN rm -rf ${repo_path} && mkdir -p ${repo_path}
 WORKDIR ${repo_path}
 COPY . .
 
-##  ICCom Test Builds
+##  ICCom Variants Builds
 
 # Workqueue - use the system WQ
 RUN make -C ${kernel_source_dir} M=${repo_path} \
@@ -48,17 +48,12 @@ RUN make -C ${kernel_source_dir} M=${repo_path} \
         && rm -rf ${repo_path}/*
 COPY . .
 
-# Default build
+##  ICCom & Full Duplex Test Transport Test Build
 RUN make -C ${kernel_source_dir} M=${repo_path} \
         CONFIG_BOSCH_ICCOM=m \
         CONFIG_CHECK_SIGNATURE=n \
-        CONFIG_ICCOM_VERSION=$(git rev-parse HEAD)
-
-##  Full Duplex Test Transport Build
-
-# Default build
-RUN make -C ${kernel_source_dir} M=${repo_path} \
-                CONFIG_BOSCH_FD_TEST_TRANSPORT=m
+        CONFIG_ICCOM_VERSION=$(git rev-parse HEAD) \
+        CONFIG_BOSCH_FD_TEST_TRANSPORT=m
 
 # Copy Default build ko to initramfs for qemu test run
 RUN mkdir -p /builds/initramfs/content/modules/ && \

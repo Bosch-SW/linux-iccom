@@ -166,7 +166,7 @@
 //
 // BACKLOG:
 //
-//      * TODO in iccom_close
+//      * TODO in iccom_delete
 //
 //      * allow socket callbacks definition hierarchy and mapping
 //        PER CHANNEL END:
@@ -414,6 +414,12 @@
 			  , __func__);					\
 		error_action;						\
 	}
+#define ICCOM_CHECK_XFER_DEVICE(msg, error_action)			\
+	if (IS_ERR_OR_NULL(iccom->xfer_device)) {			\
+		iccom_err("%s: no xfer device; "msg"\n"	\
+			  , __func__);					\
+		error_action;						\
+	}
 #define ICCOM_CHECK_CLOSING(msg, closing_action)			\
 	if (iccom->p->closing) {					\
 		iccom_warning("%s: device is closing; "msg"\n"		\
@@ -459,6 +465,11 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 			, bool __kernel *start_immediately__out
 			, void *consumer_data);
 
+void iccom_delete(struct iccom_dev *iccom);
+void iccom_unbind_xfer_device(struct iccom_dev *iccom);
+ssize_t iccom_test_sysfs_initialize_ch_list(struct iccom_dev *iccom);
+void iccom_test_sysfs_ch_del(struct iccom_dev *iccom);
+
 /* --------------------------- MAIN STRUCTURES --------------------------*/
 
 // Describes the sysfs channels which shall hold
@@ -471,24 +482,14 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 // @num_msgs {number} number of messages 
 // that a particular channel has to be read from
 // userspace
-// @sysfs_ch_msgs_head channels messages list head
+// @ch_msgs_head channels messages list head which
+//               will store iccom_messages
 // @list list_head for pointing to next channel
 struct iccom_test_sysfs_channel {
 	unsigned int ch_id;
 	unsigned int num_msgs;
-	struct list_head sysfs_ch_msgs_head;
-	struct list_head list;
-};
-
-// Describes the sysfs channels messages
-// received from iccom to upper layer which
-// will be read by user space later in time
-//
-// @msg {ptr valid} contains the message received from iccom
-// @list list_head for pointing to next previous message
-struct iccom_test_sysfs_channel_msg {
-	struct iccom_message *msg;
-	struct list_head list;
+	struct list_head ch_msgs_head;
+	struct list_head list_anchor;
 };
 
 // TODO: probably not needed
@@ -1556,7 +1557,7 @@ invalidate_packet:
 //      0 means that no more pakets can be added to the package. So
 //      the package is ready to be sent.
 static size_t iccom_package_add_packet(struct iccom_package *package
-		, char *packet_payload, const size_t payload_size_bytes
+		, const char *packet_payload, const size_t payload_size_bytes
 		, const unsigned int channel)
 {
 	if (IS_ERR_OR_NULL(package)) {
@@ -1853,7 +1854,6 @@ struct iccom_message * __iccom_message_data_clone(
 	dst->priority = src->priority;
 	dst->finalized = src->finalized;
 	dst->uncommitted_length = src->uncommitted_length;
-	INIT_LIST_HEAD(&dst->list_anchor);
 	
 	return dst;
 }
@@ -1861,13 +1861,15 @@ struct iccom_message * __iccom_message_data_clone(
 // Routine to store an iccom message for
 // a particular sysfs channel to later on
 // be fetched by the userspace.
-// The sysfs channels list shall be locked
-// whenever there is a userspace access. 
-// - When we store a new message in a sysfs
-//   channel for later usage by the user space
-// - When userspace reads a message from a sysfs
-//   channel
-// - When userspce creates/deletes a sysfs channel
+//
+// NOTE: The mutex shall be locked for accessing
+//       the sysfs channels list whenever there is
+//       a userspace access:
+//        - When we store a new message in a sysfs
+//          channel for later usage by the user space
+//        - When userspace pops a message from a sysfs
+//          channel
+//        - When userspce creates/deletes a sysfs channel
 //
 // @iccom {valid prt} iccom_dev pointer
 // @ch_id {number} ICCom logical channel ID
@@ -1883,20 +1885,14 @@ ssize_t iccom_test_sysfs_ch_enqueue_msg(
 {
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
+	ICCOM_CHECK_PTR(msg, return -EFAULT);
+	ICCOM_CHECK_PTR(msg->data, return -EFAULT);
 
-	struct iccom_test_sysfs_channel *ch_entry, *tmp = NULL;
-	struct iccom_test_sysfs_channel_msg * ch_msg_entry = NULL;
+	struct iccom_test_sysfs_channel *ch_entry = NULL;
+	struct iccom_test_sysfs_channel *tmp = NULL;
 	ssize_t error_result;
 	bool enqueue_msg_status = false;
 
-	if (IS_ERR_OR_NULL(msg)) {
-		iccom_err("Sysfs iccom message is null");
-		return -EFAULT;
-	}
-	if (IS_ERR_OR_NULL(msg->data)) {
-		iccom_err("Sysfs iccom message data is null");
-		return -EFAULT;
-	}
 	if (msg->length == 0) {
 		iccom_err("Sysfs iccom message data size is 0");
 		return -EINVAL;
@@ -1904,7 +1900,7 @@ ssize_t iccom_test_sysfs_ch_enqueue_msg(
 	
 	mutex_lock(&iccom->p->sysfs_test_ch_lock);
 	list_for_each_entry_safe(ch_entry, tmp,
-				&iccom->p->sysfs_test_ch_head , list) {
+				&iccom->p->sysfs_test_ch_head , list_anchor) {
 		if (ch_entry->ch_id != ch_id) {
 			continue;
 		}
@@ -1914,20 +1910,13 @@ ssize_t iccom_test_sysfs_ch_enqueue_msg(
 			goto finalize;
 		}
 
-		ch_msg_entry = (struct iccom_test_sysfs_channel_msg *)
-				kzalloc(sizeof(struct iccom_test_sysfs_channel_msg), GFP_KERNEL);
-		if (IS_ERR_OR_NULL(ch_msg_entry)) {
-			error_result = -ENOMEM;
+		struct iccom_message * msg_cloned = __iccom_message_data_clone(msg);
+		if (IS_ERR_OR_NULL(msg_cloned)) {
+			error_result = -EFAULT;
 			goto finalize;
 		}
 
-		ch_msg_entry->msg = __iccom_message_data_clone(msg);
-		if (IS_ERR_OR_NULL(ch_msg_entry->msg)) {
-			error_result = -EFAULT;
-			goto iccom_msg_clone_failed;
-		}
-
-		list_add(&ch_msg_entry->list, &ch_entry->sysfs_ch_msgs_head);
+		list_add(&msg_cloned->list_anchor, &ch_entry->ch_msgs_head);
 		ch_entry->num_msgs++;
 		enqueue_msg_status = true;
 		break;
@@ -1941,9 +1930,6 @@ ssize_t iccom_test_sysfs_ch_enqueue_msg(
 	}
 	return 0;
 
-iccom_msg_clone_failed:
-	kfree(ch_msg_entry);
-	ch_msg_entry = NULL;
 finalize:
 	mutex_unlock(&iccom->p->sysfs_test_ch_lock);
 	return error_result;
@@ -1963,12 +1949,9 @@ static void iccom_test_sysfs_ch_callback(
 		struct iccom_message *msg)
 {
 #ifdef ICCOM_DEBUG
-	char buf[PAGE_SIZE];
-
-	scnprintf(buf, PAGE_SIZE, ICCOM_LOG_PREFIX"Sniffed iccom message for"
-						" ch: %d with data: ", channel);
-
-	print_hex_dump(KERN_INFO, buf, 0, 16
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, ICCOM_LOG_PREFIX
+			"Sniffed iccom message for ch: %d.", channel);
+	print_hex_dump(KERN_INFO, "with data: ", 0, 16
 			, 1, msg->data, msg->length, true);
 #endif
 
@@ -1980,6 +1963,10 @@ static void iccom_test_sysfs_ch_callback(
 
 // Checks whether sysfs channel is already
 // created/present
+//
+// NOTE: The mutex shall be locked before
+//       this function get's called for
+//       accessing the sysfs channels list
 //
 // @iccom {valid prt} iccom_dev pointer
 // @ch_id {number} ICCom logical channel ID
@@ -1995,17 +1982,16 @@ bool iccom_test_sysfs_is_ch_present(
 
 	bool ch_present = false;
 
-	struct iccom_test_sysfs_channel *ch_entry, *tmp;
+	struct iccom_test_sysfs_channel *ch_entry = NULL;
+	struct iccom_test_sysfs_channel *tmp = NULL;
 
-	mutex_lock(&iccom->p->sysfs_test_ch_lock);
 	list_for_each_entry_safe(ch_entry, tmp,
-			&iccom->p->sysfs_test_ch_head , list) {
+			&iccom->p->sysfs_test_ch_head, list_anchor) {
 		if (ch_entry->ch_id == ch_id) {
 			ch_present = true;
 			break;
 		}
 	}
-	mutex_unlock(&iccom->p->sysfs_test_ch_lock);
 	return ch_present;
 }
 
@@ -2043,10 +2029,15 @@ static int __iccom_msg_storage_pass_channel_to_consumer(
 	iccom_msg_ready_callback_ptr_t msg_ready_callback = NULL;
 	void *callback_consumer_data = NULL;
 
-	mutex_lock(&storage->lock);
+	mutex_lock(&storage->iccom->p->sysfs_test_ch_lock);
 
-	bool iccom_test_sysfs_channel_present = iccom_test_sysfs_is_ch_present(
-					storage->iccom, channel_rec->channel);
+	const bool iccom_test_sysfs_channel_present = 
+		iccom_test_sysfs_is_ch_present(storage->iccom,
+						 channel_rec->channel);
+
+	mutex_unlock(&storage->iccom->p->sysfs_test_ch_lock);
+
+	mutex_lock(&storage->lock);
 
 	if (!IS_ERR_OR_NULL(channel_rec->message_ready_callback)) {
 		msg_ready_callback = channel_rec->message_ready_callback;
@@ -3625,7 +3616,7 @@ static void __iccom_queue_free(struct iccom_dev *iccom)
 //      < 0 : the negated error number
 //      0   : success
 static int __iccom_queue_append_message(struct iccom_dev *iccom
-			       , char *data, const size_t length
+			       , const char *data, const size_t length
 			       , unsigned int channel
 			       , unsigned int priority)
 {
@@ -4116,6 +4107,11 @@ finalize:
 // the ICCom driver.
 void __iccomm_stop_xfer_device(struct iccom_dev *iccom)
 {
+	ICCOM_CHECK_DEVICE("struct ptr broken", return);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return);
+	ICCOM_CHECK_PTR(&iccom->xfer_iface.close, return);
+
+	iccom_info_raw(ICCOM_LOG_INFO_KEY_LEVEL, "Closing transport device");
 	iccom->xfer_iface.close(iccom->xfer_device);
 }
 
@@ -4229,6 +4225,7 @@ int iccom_post_message(struct iccom_dev *iccom
 {
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return -ENODEV);
 	ICCOM_CHECK_CHANNEL("bad channel", return -EBADSLT);
 	if (IS_ERR_OR_NULL(data)) {
 		iccom_err("broken data pointer provided");
@@ -4291,6 +4288,7 @@ int iccom_post_message(struct iccom_dev *iccom
 __maybe_unused
 int iccom_flush(struct iccom_dev *iccom)
 {
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return -ENODEV);
 	int res = __iccom_initiate_data_xfer(iccom);
 	if (res < 0) {
 		iccom_err("Failed to initiate the message: err = %d", res);
@@ -4337,6 +4335,7 @@ int iccom_set_channel_callback(struct iccom_dev *iccom
 {
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return -ENODEV);
 	ICCOM_CHECK_CHANNEL("bad channel", return -EBADSLT);
 	ICCOM_CHECK_CLOSING("will not invoke", return -EBADFD);
 	if (IS_ERR(message_ready_callback)) {
@@ -4371,6 +4370,7 @@ int iccom_remove_channel_callback(struct iccom_dev *iccom
 {
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return -ENODEV);
 	ICCOM_CHECK_CHANNEL("bad channel", return -EBADSLT);
 	ICCOM_CHECK_CLOSING("will not invoke", return -EBADFD);
 	return iccom_msg_storage_reset_channel_callback(
@@ -4400,6 +4400,7 @@ iccom_msg_ready_callback_ptr_t iccom_get_channel_callback(
 {
 	ICCOM_CHECK_DEVICE("no device provided", return ERR_PTR(-ENODEV));
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return ERR_PTR(-EINVAL));
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return ERR_PTR(-ENODEV));
 	ICCOM_CHECK_CHANNEL("bad channel", return ERR_PTR(-EBADSLT));
 	ICCOM_CHECK_CLOSING("will not invoke", return ERR_PTR(-EBADFD));
 	return iccom_msg_storage_get_channel_callback(
@@ -4464,6 +4465,7 @@ int iccom_read_message(struct iccom_dev *iccom
 {
 	ICCOM_CHECK_DEVICE("", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("", return -EINVAL);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return -ENODEV);
 	ICCOM_CHECK_CHANNEL("", return -EBADSLT);
 	ICCOM_CHECK_CLOSING("", return -EBADFD);
 	ICCOM_CHECK_PTR(msg_data_ptr__out, return -EFAULT);
@@ -4502,12 +4504,9 @@ int iccom_read_message(struct iccom_dev *iccom
 //
 // @iccom {valid iccom_dev ptr} managed by consumer. Not to be
 //      amended while ICCom is active (not closed).
-//
-//      @xfer_device field of iccom_dev structure must
-//      point to valid transport layer device.
-//
-//      @xfer_iface member should be valid and contain all
-//      pointers.
+// @pdef {valid pdev ptr} platform device containing the iccom
+//      instance that shall be used for creating the sysfs channels
+//      root folder
 //
 //      iccom_dev_private structure pointer initialized by iccom
 //      for internal needs.
@@ -4519,7 +4518,7 @@ int iccom_read_message(struct iccom_dev *iccom
 // which init method didn't return with success state (yet).
 //
 // CONCURRENCE: caller should ensure that no one of iccom_init(...),
-//      iccom_close(...) will be called under data-race conditions
+//      iccom_delete(...) will be called under data-race conditions
 //      with the same struct iccom_dev.
 //
 // CONTEXT: sleepable
@@ -4528,7 +4527,7 @@ int iccom_read_message(struct iccom_dev *iccom
 //      0 on success
 //      negative error code on error
 __maybe_unused
-int iccom_init(struct iccom_dev *iccom)
+int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
 {
 	ICCOM_CHECK_DEVICE("struct ptr broken", return -ENODEV);
 
@@ -4545,6 +4544,7 @@ int iccom_init(struct iccom_dev *iccom)
 	}
 	iccom->p->iccom = iccom;
 	iccom->xfer_device = NULL;
+	memset(&iccom->xfer_iface, 0, sizeof(struct full_duplex_sym_iface));
 
 	__iccom_error_report_init(iccom);
 
@@ -4587,9 +4587,33 @@ int iccom_init(struct iccom_dev *iccom)
 
 	iccom->p->closing = false;
 
+	mutex_init(&iccom->p->sysfs_test_ch_lock);
+
+	res = iccom_test_sysfs_initialize_ch_list(iccom);
+
+	if (res != 0) {
+		iccom_err("Sysfs Channel List initialization failed");
+		goto iccom_test_sysfs_destroy_iccom;
+	}
+
+	// Create sysfs channels root directory to hold sysfs channels
+	iccom->p->channels_root = kobject_create_and_add(
+						ICCOM_TEST_SYSFS_CHANNEL_ROOT,
+						&(pdev->dev.kobj));
+
+	if (IS_ERR_OR_NULL(iccom->p->channels_root)) {
+		iccom_err("Sysfs channel failed to create channel root");
+		res = -EFAULT;
+		goto iccom_test_sysfs_destroy_iccom;
+
+	}
 
 	return 0;
 
+iccom_test_sysfs_destroy_iccom:
+	iccom_delete(iccom);
+	iccom_unbind_xfer_device(iccom);
+	mutex_destroy(&iccom->p->sysfs_test_ch_lock);
 free_pkg_storage:
 	__iccom_free_packages_storage(iccom);
 free_msg_storage:
@@ -4603,7 +4627,9 @@ finalize:
 
 // API
 //
-// Starts the iccom
+// Starts the iccom device with the transport
+// making sure the xfer interface is proper and
+// initialized the communication
 //
 // @iccom {valid iccom_dev ptr} managed by consumer. Not to be
 //      amended while ICCom is active (not closed).
@@ -4633,28 +4659,28 @@ finalize:
 //      0 on success
 //      negative error code on error
 __maybe_unused
-int iccom_startup(struct iccom_dev *iccom)
+int iccom_start(struct iccom_dev *iccom)
 {
 	ICCOM_CHECK_DEVICE("struct ptr broken", return -ENODEV);
+	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return -ENODEV);
 
-	if (IS_ERR_OR_NULL(iccom->xfer_device)) {
-		iccom_err("No transport layer device provided");
-		return -ENODEV;
-	}
 	if (!__iccom_verify_transport_layer_interface(
-			    &iccom->xfer_iface)) {
+				&iccom->xfer_iface)) {
 		iccom_err("Not all relevant interface methods are defined");
-		return -ENODEV;
+		iccom_unbind_xfer_device(iccom);
+		return -EINVAL;
 	}
 	
 	// Initializing transport layer and start communication
-	int res = iccom->xfer_iface.init(iccom->xfer_device
-				     , &iccom->p->xfer);
+	int ret = iccom->xfer_iface.init(iccom->xfer_device
+					, &iccom->p->xfer);
 
-	if (res < 0) {
+	if (ret < 0) {
 		iccom_err("Full duplex xfer device failed to"
-			  " initialize, err: %d", res);
-		return res;
+			  " initialize, err: %d", ret);
+		iccom_unbind_xfer_device(iccom);
+		return ret;
 	}
 
 	return 0;
@@ -4672,6 +4698,7 @@ void iccom_print_statistics(struct iccom_dev *iccom)
 {
 	ICCOM_CHECK_DEVICE("no device provided", return);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return);
 	ICCOM_CHECK_CLOSING("will not invoke", return);
 
 	iccom_info_raw(ICCOM_LOG_INFO_KEY_LEVEL
@@ -4720,21 +4747,15 @@ void iccom_print_statistics(struct iccom_dev *iccom)
 // TODO
 // API
 //
-// Closes the ICCom communication.
+// Deletes the ICCom communication.
 //
 // NOTE: thread safe
 __maybe_unused
-void iccom_close(struct iccom_dev *iccom)
+void iccom_delete(struct iccom_dev *iccom)
 {
 	ICCOM_CHECK_DEVICE("no device provided", return);
-	ICCOM_CHECK_DEVICE_PRIVATE("broken private device part ptr"
-				   , return);
-
-	if (IS_ERR_OR_NULL(iccom->xfer_device)) {
-	    iccom_err("Looks like provided device doesn't have"
-		      " any transport layer device attached");
-		return;
-	}
+	ICCOM_CHECK_DEVICE_PRIVATE("broken private device part ptr", return);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return);
 
 	// only one close sequence may run at the same time
 	// turning this flag will block all further external
@@ -4769,6 +4790,13 @@ void iccom_close(struct iccom_dev *iccom)
 	iccom_msg_storage_free(&iccom->p->rx_messages);
 	__iccom_queue_free(iccom);
 
+	iccom_test_sysfs_ch_del(iccom);
+	if (!IS_ERR_OR_NULL(iccom->p->channels_root)) {
+		kobject_put(iccom->p->channels_root);
+		iccom->p->channels_root = NULL;
+	}
+	mutex_destroy(&iccom->p->sysfs_test_ch_lock);
+
 	iccom->p->iccom = NULL;
 	kfree(iccom->p);
 	iccom->p = NULL;
@@ -4776,7 +4804,7 @@ void iccom_close(struct iccom_dev *iccom)
 
 // API
 //
-// Inits underlying full duplex transport and iccom devices in binded.
+// Binds the underlying full duplex transport and iccom devices.
 //
 // @iccom {valid ptr to iccom_dev struct} points to unititialized iccom_dev
 //      struct
@@ -4789,8 +4817,7 @@ void iccom_close(struct iccom_dev *iccom)
 // RETURNS:
 //      0: if all fine
 //      <0: if failed (negated error code)
-__maybe_unused
-int iccom_init_binded(struct iccom_dev *iccom
+int iccom_bind_xfer_device(struct iccom_dev *iccom
 		, const struct full_duplex_sym_iface *const full_duplex_if
 		, void *full_duplex_device)
 {
@@ -4804,40 +4831,20 @@ int iccom_init_binded(struct iccom_dev *iccom
 	iccom->xfer_device = full_duplex_device;
 	iccom->xfer_iface = *full_duplex_if;
 
-	int res = iccom_startup(iccom);
-	if (res < 0) {
-		iccom_err("ICCom driver initialization failed, "
-			  "err: %d", res);
-		full_duplex_if->close(full_duplex_device);
-		iccom->xfer_device = NULL;
-		return res;
-	}
-
-	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL
-		   , "iccom & full duplex device inited");
 	return 0;
 }
 
 // API
 //
-// Closes both binded full-duplex transport and iccom devices.
+// Unbinds both binded full-duplex transport and iccom devices.
 //
 // @iccom {valid ptr to iccom_dev struct} points to unititialized iccom_dev
 //      struct
-__maybe_unused
-void iccom_close_binded(struct iccom_dev *iccom)
+void iccom_unbind_xfer_device(struct iccom_dev *iccom)
 {
-	ICCOM_CHECK_DEVICE("no device provided", return);
-
-	iccom_info_raw(ICCOM_LOG_INFO_KEY_LEVEL, "Closing ICCom device");
-	iccom_close(iccom);
-
-	if (!IS_ERR_OR_NULL(iccom->xfer_device) && 
-			!IS_ERR_OR_NULL(&iccom->xfer_iface.close)) {
-		iccom_info_raw(ICCOM_LOG_INFO_KEY_LEVEL, "Closing transport device");
-		iccom->xfer_iface.close(iccom->xfer_device);
-	}
-	iccom_info_raw(ICCOM_LOG_INFO_KEY_LEVEL, "Closing done");
+	__iccomm_stop_xfer_device(iccom);
+	iccom->xfer_device = NULL;
+	memset(&iccom->xfer_iface, 0, sizeof(struct full_duplex_sym_iface));
 }
 
 // API
@@ -4851,6 +4858,7 @@ bool iccom_is_running(struct iccom_dev *iccom)
 {
 	ICCOM_CHECK_DEVICE("no device provided", return false);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return false);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return -ENODEV);
 	return true;
 }
 
@@ -4864,9 +4872,6 @@ EXPORT_SYMBOL(iccom_get_channel_callback);
 EXPORT_SYMBOL(iccom_read_message);
 EXPORT_SYMBOL(iccom_print_statistics);
 EXPORT_SYMBOL(iccom_init);
-EXPORT_SYMBOL(iccom_close);
-EXPORT_SYMBOL(iccom_init_binded);
-EXPORT_SYMBOL(iccom_close_binded);
 EXPORT_SYMBOL(iccom_is_running);
 
 
@@ -4880,7 +4885,7 @@ EXPORT_SYMBOL(iccom_is_running);
 // RETURNS:
 //   valid ptr: device linking ok
 //        NULL: device linking failed
-struct device_link * add_device_link_dependency(
+struct device_link * iccom_add_device_link_dependency(
 		struct device *consumer,
 		struct device *supplier)
 {
@@ -4922,62 +4927,48 @@ ssize_t iccom_test_sysfs_initialize_ch_list(struct iccom_dev *iccom)
 void iccom_test_sysfs_init_ch_msgs_list(
 		struct iccom_test_sysfs_channel * ch_entry)
 {
-	if (IS_ERR_OR_NULL(ch_entry)) {
-		iccom_err("Iccom channel entry is null");
-		return;
-	}
-	INIT_LIST_HEAD(&ch_entry->sysfs_ch_msgs_head);
-}
-
-// Destroys an iccom message stored in a specific
-// sysfs channel
-//
-// @ch_msg_entry {valid prt} sysfs channel msg entry
-void iccom_test_sysfs_ch_msg_del_entry(
-		struct iccom_test_sysfs_channel_msg *ch_msg_entry)
-{
-	if (IS_ERR_OR_NULL(ch_msg_entry)) {
-		return;
-	}
-	if (!IS_ERR_OR_NULL(ch_msg_entry->msg)) {
-		__iccom_message_free(ch_msg_entry->msg);
-	}
-	list_del(&ch_msg_entry->list);
+	ICCOM_CHECK_PTR(ch_entry, return);
+	INIT_LIST_HEAD(&ch_entry->ch_msgs_head);
 }
 
 // Destroy a sysfs channel and all its containing
 // iccom messages stored for the specific sysfs channel
 //
+// NOTE: The mutex shall be locked before
+//       this function get's called for
+//       accessing the sysfs channels list
+//
 // @ch_entry {valid prt} sysfs channel entry
 void iccom_test_sysfs_ch_del_entry(
 		struct iccom_test_sysfs_channel *ch_entry)
 {
-	struct iccom_test_sysfs_channel_msg *ch_msg_entry, *tmp;
+	ICCOM_CHECK_PTR(ch_entry, return);
 
-	if (IS_ERR_OR_NULL(ch_entry)) {
-		return;
-	}
+	struct iccom_message *msg, *tmp;
+
 	ch_entry->ch_id = -1;
 	ch_entry->num_msgs = 0;
 
 	/* Destroy all msgs from a sysfs channel*/
-	list_for_each_entry_safe(ch_msg_entry, tmp,
-			&ch_entry->sysfs_ch_msgs_head, list) {
-		iccom_test_sysfs_ch_msg_del_entry(ch_msg_entry);
+	list_for_each_entry_safe(msg, tmp,
+			&ch_entry->ch_msgs_head, list_anchor) {
+		__iccom_message_free(msg);
 	}
 	
-	list_del(&ch_entry->list);
+	list_del(&ch_entry->list_anchor);
 }
 
 // Destroy all sysfs channels and their iccom
 // messages associated with a specific iccom instance.
-// The sysfs channels list shall be locked
-// whenever there is a userspace access. 
-// - When we store a new message in a sysfs
-//   channel for later usage by the user space
-// - When userspace reads a message from a sysfs
-//   channel
-// - When userspce creates/deletes a sysfs channel
+//
+// NOTE: The mutex shall be locked for accessing
+//       the sysfs channels list whenever there is
+//       a userspace access:
+//        - When we store a new message in a sysfs
+//          channel for later usage by the user space
+//        - When userspace pops a message from a sysfs
+//          channel
+//        - When userspce creates/deletes a sysfs channel
 //
 // @iccom {valid prt} iccom_dev pointer for device
 void iccom_test_sysfs_ch_del(struct iccom_dev *iccom)
@@ -4985,11 +4976,12 @@ void iccom_test_sysfs_ch_del(struct iccom_dev *iccom)
 	ICCOM_CHECK_DEVICE("no device provided", return);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return);
 
-	struct iccom_test_sysfs_channel *ch_entry, *tmp;
-	
+	struct iccom_test_sysfs_channel *ch_entry = NULL;
+	struct iccom_test_sysfs_channel *tmp = NULL;
+
 	mutex_lock(&iccom->p->sysfs_test_ch_lock);
 	list_for_each_entry_safe(ch_entry, tmp,
-				&iccom->p->sysfs_test_ch_head , list) {
+				&iccom->p->sysfs_test_ch_head , list_anchor) {
 		iccom_test_sysfs_ch_del_entry(ch_entry);
 	}
 	mutex_unlock(&iccom->p->sysfs_test_ch_lock);
@@ -4998,6 +4990,10 @@ void iccom_test_sysfs_ch_del(struct iccom_dev *iccom)
 // Routine for extracting an iccom message
 // from a specific sysfs channel and remove it from
 // the list for userspace usage
+//
+// NOTE: The mutex shall be locked before
+//       this function get's called for
+//       accessing the sysfs channels list
 //
 // @ch_entry {valid prt} channel where the message
 // is stored
@@ -5011,18 +5007,18 @@ ssize_t iccom_test_sysfs_ch_pop_msg(
 		struct iccom_test_sysfs_channel *ch_entry, char * buf__out,
 		size_t buf_size)
 {
-	struct iccom_test_sysfs_channel_msg *ch_msg_entry, *tmp;
-	list_for_each_entry_safe_reverse(ch_msg_entry, tmp,
-				&ch_entry->sysfs_ch_msgs_head, list) {
-		ssize_t length = ch_msg_entry->msg->length;
+	struct iccom_message *msg, *tmp;
+	list_for_each_entry_safe_reverse(msg, tmp,
+				&ch_entry->ch_msgs_head, list_anchor) {
+		ssize_t length = msg->length;
 		if (length > buf_size) {
 			iccom_err("Sysfs channel %d message is bigger"
 					" than the buffer", ch_entry->ch_id);
 			return -EINVAL;
 		}
-		memcpy(buf__out, ch_msg_entry->msg->data, length);
 		ch_entry->num_msgs--;
-		iccom_test_sysfs_ch_msg_del_entry(ch_msg_entry);
+		memcpy(buf__out, msg->data, length);
+		__iccom_message_free(msg);
 		return length;
 	}
 
@@ -5033,13 +5029,15 @@ ssize_t iccom_test_sysfs_ch_pop_msg(
 
 // Routine to retrieve a sysfs channel iccom message
 // and provide it to userspace.
-// The sysfs channels list shall be locked
-// whenever there is a userspace access. 
-// - When we store a new message in a sysfs
-//   channel for later usage by the user space
-// - When userspace reads a message from a sysfs
-//   channel
-// - When userspce creates/deletes a sysfs channel
+//
+// NOTE: The mutex shall be locked for accessing
+//       the sysfs channels list whenever there is
+//       a userspace access:
+//        - When we store a new message in a sysfs
+//          channel for later usage by the user space
+//        - When userspace pops a message from a sysfs
+//          channel
+//        - When userspce creates/deletes a sysfs channel
 //
 // @iccom {valid prt} iccom_dev pointer
 // @ch_id {number} ICCom logical channel ID
@@ -5060,7 +5058,7 @@ ssize_t iccom_test_sysfs_ch_pop_msg_by_ch_id(
 
 	mutex_lock(&iccom->p->sysfs_test_ch_lock);
 	list_for_each_entry_safe(cursor, tmp,
-				&iccom->p->sysfs_test_ch_head , list) {
+				&iccom->p->sysfs_test_ch_head , list_anchor) {
 		if (cursor->ch_id == ch_id) {
 			ssize_t result = iccom_test_sysfs_ch_pop_msg(
 						cursor, buf__out, buf_size);
@@ -5075,13 +5073,15 @@ ssize_t iccom_test_sysfs_ch_pop_msg_by_ch_id(
 }
 
 // Add a sysfs channel for an ICCom device.
-// The sysfs channels list shall be locked
-// whenever there is a userspace access. 
-// - When we store a new message in a sysfs
-//   channel for later usage by the user space
-// - When userspace reads a message from a sysfs
-//   channel
-// - When userspce creates/deletes a sysfs channel
+//
+// NOTE: The mutex shall be locked for accessing
+//       the sysfs channels list whenever there is
+//       a userspace access:
+//        - When we store a new message in a sysfs
+//          channel for later usage by the user space
+//        - When userspace pops a message from a sysfs
+//          channel
+//        - When userspce creates/deletes a sysfs channel
 //
 // @iccom {valid prt} iccom_dev pointer
 // @ch_id {number} ICCom logical channel ID
@@ -5094,11 +5094,15 @@ ssize_t iccom_test_sysfs_ch_add_by_iccom(
 {
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
+	ssize_t ret;
 
 	struct iccom_test_sysfs_channel * iccom_ch_entry = NULL;
 
+	mutex_lock(&iccom->p->sysfs_test_ch_lock);
+
 	if (iccom_test_sysfs_is_ch_present(iccom, ch_id)) {
-		return -EINVAL;
+		ret = -EINVAL;
+		goto finalize;
 	}
 
 	iccom_ch_entry = kzalloc(sizeof(struct iccom_test_sysfs_channel)
@@ -5106,27 +5110,31 @@ ssize_t iccom_test_sysfs_ch_add_by_iccom(
 
 	if (IS_ERR_OR_NULL(iccom_ch_entry)) {
 		iccom_err("No memory to allocate sysfs channel entry.");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto finalize;
 	}
 
 	iccom_ch_entry->ch_id = ch_id;
 	iccom_ch_entry->num_msgs = 0;
 	iccom_test_sysfs_init_ch_msgs_list(iccom_ch_entry);
-	mutex_lock(&iccom->p->sysfs_test_ch_lock);
-	list_add(&iccom_ch_entry->list, &iccom->p->sysfs_test_ch_head );
-	mutex_unlock(&iccom->p->sysfs_test_ch_lock);
+	list_add(&iccom_ch_entry->list_anchor, &iccom->p->sysfs_test_ch_head);
+	ret = 0;
 
-	return 0;
+finalize:
+	mutex_unlock(&iccom->p->sysfs_test_ch_lock);
+	return ret;
 }
 
 // Destroy a sysfs channel for an ICCom device
-// The sysfs channels list shall be locked
-// whenever there is a userspace access. 
-// - When we store a new message in a sysfs
-//   channel for later usage by the user space
-// - When userspace reads a message from a sysfs
-//   channel
-// - When userspce creates/deletes a sysfs channel
+//
+// NOTE: The mutex shall be locked for accessing
+//       the sysfs channels list whenever there is
+//       a userspace access:
+//        - When we store a new message in a sysfs
+//          channel for later usage by the user space
+//        - When userspace pops a message from a sysfs
+//          channel
+//        - When userspce creates/deletes a sysfs channel
 //
 // @iccom {valid prt} iccom_dev pointer
 // @ch_id {number} ICCom logical channel ID
@@ -5140,10 +5148,12 @@ ssize_t iccom_test_sysfs_ch_del_by_iccom(
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
 
-	struct iccom_test_sysfs_channel *ch_entry, *tmp;
+	struct iccom_test_sysfs_channel *ch_entry = NULL;
+	struct iccom_test_sysfs_channel *tmp = NULL;
+
 	mutex_lock(&iccom->p->sysfs_test_ch_lock);
 	list_for_each_entry_safe(ch_entry, tmp, &iccom->p->sysfs_test_ch_head
-								, list) {
+								, list_anchor) {
 		if (ch_entry->ch_id == ch_id) {
 			iccom_test_sysfs_ch_del_entry(ch_entry);
 			mutex_unlock(&iccom->p->sysfs_test_ch_lock);
@@ -5189,6 +5199,7 @@ size_t iccom_test_sysfs_trim_buffer(char *buf, size_t size)
 static ssize_t version_show(
 		struct class *class, struct class_attribute *attr, char *buf)
 {
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
 	return scnprintf(buf, PAGE_SIZE, "%s", ICCOM_VERSION);
 }
 
@@ -5209,6 +5220,8 @@ static ssize_t create_iccom_store(
 		struct class *class, struct class_attribute *attr,
 		const char *buf, size_t count)
 {
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+
 	// Allocate one unused ID
 	int device_id = ida_alloc(&iccom_dev_id, GFP_KERNEL);
 
@@ -5237,7 +5250,9 @@ static CLASS_ATTR_WO(create_iccom);
 // @class {valid ptr} iccom class
 // @attr {valid ptr} device attribute properties
 // @buf {valid ptr} buffer to read input from user space
-// @count {number} size of buffer from user space
+// @count {number} size of buffer from user space without
+//                 taking in consideration the 0-terminator
+//                 character added automatically by the sysfs
 //
 // RETURNS:
 //  count: ok
@@ -5246,13 +5261,21 @@ static ssize_t delete_iccom_store(
 		struct class *class, struct class_attribute *attr,
 		const char *buf, size_t count)
 {
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+
 	if (count >= PAGE_SIZE) {
 		iccom_warning("Sysfs data can not fit the 0-terminator.");
 		return -EINVAL;
 	}
 
+	// NOTE: count is a length without the last 0-terminator char
+	if (buf[count] != 0) {
+		iccom_warning("NON-null-terminated string is provided by sysfs.");
+		return -EFAULT;
+	}
+
 	// Sysfs store procedure has data from userspace with length equal
-	// to count. The next byte after the data sent (count + 1) will always
+	// to count. The next byte after the data sent (count + 1) will alwaysfv
 	// be a 0-terminator char. This is the default behavior of sysfs.
 	size_t total_count = count + 1;
 	char *device_name = (char *) kzalloc(total_count, GFP_KERNEL);
@@ -5263,11 +5286,6 @@ static ssize_t delete_iccom_store(
 	
 	memcpy(device_name, buf, total_count);
 
-	// NOTE: count is a length without the last 0-terminator char
-	if (device_name[count] != 0) {
-		iccom_warning("NON-null-terminated string is provided by sysfs.");
-		goto clean_up_device_name_buffer_memory;
-	}
 
 	(void)iccom_test_sysfs_trim_buffer(device_name, count);
 
@@ -5285,11 +5303,6 @@ static ssize_t delete_iccom_store(
 	platform_device_unregister(to_platform_device(platform_device));
 
 	return count;
-
-clean_up_device_name_buffer_memory:
-	kfree(device_name);
-	device_name = NULL;
-	return -EFAULT;
 }
 
 static CLASS_ATTR_WO(delete_iccom);
@@ -5318,44 +5331,40 @@ ATTRIBUTE_GROUPS(iccom_class);
 // @attr {valid ptr} device attribute properties
 // @buf {valid ptr} buffer to write output to user space
 //
+// NOTE: US will receive "" whenever there is no sysfs test
+//       transport associated otherwise it shall receive:
+//       "Transport device associated"
+//
 // RETURNS:
 //      0: no data to be displayed
 //      > 0: size of data to be showed in user space
 static ssize_t transport_show(
 		struct device *dev, struct device_attribute *attr, char *buf)
 {
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+
 	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
 	
-	if (IS_ERR_OR_NULL(iccom)) {
-		iccom_err("Iccom is null");
-		return scnprintf(buf, PAGE_SIZE,
-			"%s", "No transport device associated yet - iccom is null");
-	}
-
-	if (IS_ERR_OR_NULL(iccom->p)) {
-		iccom_err("Iccom private data is null");
-		return scnprintf(buf, PAGE_SIZE,
-			"%s", "No transport device associated yet "
-			"- iccom private data is null");
-	}
-
-	if (IS_ERR_OR_NULL(iccom->xfer_device)) {
-		iccom_err("Iccom device data xfer_device is null.");
-		return scnprintf(buf, PAGE_SIZE, 
-			"%s", "No transport device associated yet - iccxfer device is null");
-	}
+	// NOTE: Here we return 0 so that the user space receives
+	//       an empty response instead of an error. We log
+	//       the error nevertheless.
+	ICCOM_CHECK_DEVICE("no device provided", return 0);
+	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return 0);
+	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return 0);
 
 	return scnprintf(buf, PAGE_SIZE, "%s", "Transport device associated");
 }
 
 // Method to allow associating a transport to
 // an iccom device and initialize the iccom device
-// via iccom_init_binded
+// via iccom_bind_xfer_device
 //
 // @dev {valid ptr} iccom device
 // @attr {valid ptr} device attribute properties
 // @buf {valid ptr} buffer to read input from user space
-// @count {number} size of buffer from user space
+// @count {number} size of buffer from user space without
+//                 taking in consideration the 0-terminator
+//                 character added automatically by the sysfs
 //
 // RETURNS:
 //  count: ok
@@ -5364,20 +5373,21 @@ static ssize_t transport_store(
 		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	struct iccom_dev *iccom = 
-				(struct iccom_dev *)dev_get_drvdata(dev);
-	int ret;
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
 
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
-
-	if (!IS_ERR_OR_NULL(iccom->xfer_device)) {
-		iccom_err("Transport test device is already associated.");
-		return -EINVAL;
-	}
 
 	if (count >= PAGE_SIZE) {
 		iccom_warning("Sysfs data can not fit the 0-terminator.");
 		return -EINVAL;
+	}
+
+	// NOTE: count is a length without the last 0-terminator char
+	if (buf[count] != 0) {
+		iccom_warning("NON-null-terminated string is provided by sysfs.");
+		return -EFAULT;
 	}
 
 	// Sysfs store procedure has data from userspace with length equal
@@ -5391,12 +5401,6 @@ static ssize_t transport_store(
 	}
 	
 	memcpy(device_name, buf, total_count);
-
-	// NOTE: count is a length without the last 0-terminator char
-	if (device_name[count] != 0) {
-		iccom_warning("NON-null-terminated string is provided by sysfs.");
-		goto clean_up_device_name_buffer_memory;
-	}
 
 	(void)iccom_test_sysfs_trim_buffer(device_name, count);
 
@@ -5415,7 +5419,8 @@ static ssize_t transport_store(
 		(struct full_duplex_device *) dev_get_drvdata(platform_device);
 
 	if (IS_ERR_OR_NULL(full_duplex_dev)) {
-		iccom_err("Transport test device data is null.");
+		iccom_err("The given transport device has not been found: %s",
+				device_name);
 		return -EFAULT;
 	}
 
@@ -5424,7 +5429,7 @@ static ssize_t transport_store(
 		return -EFAULT;
 	}
 
-	struct device_link *link_downwards = add_device_link_dependency(dev,
+	struct device_link *link_downwards = iccom_add_device_link_dependency(dev,
 						 platform_device);
 
 	if (IS_ERR_OR_NULL(link_downwards)) {
@@ -5433,23 +5438,28 @@ static ssize_t transport_store(
 		return -EFAULT;
 	}
 
-	ret = iccom_init_binded(iccom,
+	ssize_t ret = iccom_bind_xfer_device(iccom,
 					full_duplex_dev->iface,
 					(void*)platform_device);
 
 	if (ret != 0) {
-		iccom_err("Iccom Init failed with the provided device.");
+		iccom_err("Iccom transport device binding failed.");
 		device_link_del(link_downwards);
 		return -EINVAL;
 	}
+	
+	ret = iccom_start(iccom);
+	if (ret < 0) {
+		iccom_err("ICCom driver start failed, "
+			  "err: %ld", ret);
 
-	iccom_warning("Iccom device binding to transport device was sucessful");
+		return ret;
+	}
+
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL
+		   , "iccom & full duplex device binded sucessfully");
+
 	return count;
-
-clean_up_device_name_buffer_memory:
-	kfree(device_name);
-	device_name = NULL;
-	return -EFAULT;
 }
 
 static DEVICE_ATTR_RW(transport);
@@ -5467,12 +5477,12 @@ static DEVICE_ATTR_RW(transport);
 static ssize_t statistics_show(
 		struct device *dev, struct device_attribute *attr, char *buf)
 {
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+
 	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
 
-	if (IS_ERR_OR_NULL(iccom)) {
-		iccom_err("Iccom is null");
-		return scnprintf(buf, PAGE_SIZE, "%s", "Statistics error.");
-	}
+	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
+	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -ENODEV);
 
 	const struct iccom_dev_statistics * const stats = 
 						&iccom->p->statistics;
@@ -5533,26 +5543,20 @@ static DEVICE_ATTR_RO(statistics);
 static ssize_t channel_show(
 		struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	unsigned ch_id = 0;
-
-	if (IS_ERR_OR_NULL(kobj->parent)) {
-		iccom_err("Sysfs channel parent is null.");
-		return -EFAULT;
-	}
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+	ICCOM_CHECK_PTR(kobj->parent, return -EFAULT);
 
 	struct device *iccom_dev = kobj_to_dev(kobj->parent);
 
-	if (IS_ERR_OR_NULL(iccom_dev)) {
-		iccom_err("Sysfs channel iccom device is null.");
-		return -EFAULT;
-	}
+	ICCOM_CHECK_PTR(iccom_dev, return -EFAULT);
 
 	struct iccom_dev *iccom = (struct iccom_dev*)dev_get_drvdata(iccom_dev);
 
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 
+	unsigned ch_id = 0;
 	if (kstrtouint(attr->attr.name, 10, &ch_id) != 0) {
-		iccom_err("Sysfs channel id is not an unsigned int.");
+		iccom_err("Sysfs channel id is not an unsigned int, given: %s", attr->attr.name);
 		return -EINVAL;
 	}
 
@@ -5575,24 +5579,18 @@ static ssize_t channel_store(
 		struct kobject *kobj, struct kobj_attribute *attr,
 		const char *buf, size_t count)
 {
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+	ICCOM_CHECK_PTR(kobj->parent, return -EFAULT);
+
 	unsigned ch_id = 0;
-
 	if (kstrtouint(attr->attr.name, 10, &ch_id) != 0) {
-		iccom_err("Sysfs channel id is not an unsigned int.");
+		iccom_err("Sysfs channel id is not an unsigned int, given: %s", attr->attr.name);
 		return -EINVAL;
-	}
-
-	if (IS_ERR_OR_NULL(kobj->parent)) {
-		iccom_err("Sysfs channel parent is null.");
-		return -EFAULT;
 	}
 
 	struct device *iccom_dev = kobj_to_dev(kobj->parent);
 
-	if (IS_ERR_OR_NULL(iccom_dev)) {
-		iccom_err("Sysfs channel iccom device is null.");
-		return -EFAULT;
-	}
+	ICCOM_CHECK_PTR(iccom_dev, return -EFAULT);
 
 	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(iccom_dev);
 
@@ -5608,6 +5606,7 @@ static ssize_t channel_store(
 	if (ret < 0) {
 		iccom_err("Failed to post message for channel %d with result %d",
 				ch_id, ret);
+		return ret;
 	}
 
 	return count;
@@ -5628,21 +5627,17 @@ static ssize_t channels_ctl_store(
 		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	char option;
-	ssize_t sysfs_result;
-	unsigned int ch_id;
-	static char channel_name[ICCOM_TEST_SYSFS_CH_CMD_MAX_CHAR+1];
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
 
 	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
 
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
 	
-	if (IS_ERR_OR_NULL(iccom->p->channels_root)) {
-			iccom_err("Sysfs channel does not have a channel root");
-			return -EFAULT;
-	}
+	ICCOM_CHECK_PTR(iccom->p->channels_root, return -EFAULT);
 
+	char option;
+	unsigned int ch_id;
 	if (2 != sscanf(buf,"%c%u", &option, &ch_id)) {
 		iccom_err("Sysfs channel ctl format error!\n"
 				"xN where x - is one of [c;d]\n"
@@ -5652,7 +5647,8 @@ static ssize_t channels_ctl_store(
 		return -EINVAL;
 	}
 
-	scnprintf(channel_name, sizeof(channel_name)/sizeof(char), "%d", ch_id);
+	static char channel_name[ICCOM_TEST_SYSFS_CH_CMD_MAX_CHAR+1];
+	scnprintf(channel_name, sizeof(channel_name), "%d", ch_id);
 
 	struct kernfs_node *knode = sysfs_get_dirent(
 						iccom->p->channels_root->sd,
@@ -5668,8 +5664,9 @@ static ssize_t channels_ctl_store(
 
 	if (option == ICCOM_SYSFS_CREATE_CHANNEL) {
 		if (!IS_ERR_OR_NULL(knode)) {
-			iccom_err("Sysfs channel already exists");
-			return -EINVAL;
+			iccom_err("Sysfs channel creation requested but ignored"
+					" as sysfs channel already exists.");
+			return count;
 		}
 		if (sysfs_create_file(iccom->p->channels_root,
 						&channel_attr.attr) != 0) {
@@ -5677,7 +5674,7 @@ static ssize_t channels_ctl_store(
 			return -EINVAL;
 		}
 
-		sysfs_result = iccom_test_sysfs_ch_add_by_iccom(iccom, ch_id);
+		ssize_t sysfs_result = iccom_test_sysfs_ch_add_by_iccom(iccom, ch_id);
 		if (sysfs_result != 0) {
 			iccom_err("Sysfs channel list add failed");
 			sysfs_remove_file(iccom->p->channels_root, &channel_attr.attr);
@@ -5685,18 +5682,20 @@ static ssize_t channels_ctl_store(
 		}
 	} else if (option == ICCOM_SYSFS_DELETE_CHANNEL) {
 		if (IS_ERR_OR_NULL(knode)) {
-			iccom_err("Sysfs channel does not exist");
-			return -EFAULT;
+			iccom_err("Sysfs channel deletion requested but ignored"
+					" as sysfs channel does not exist.");
+			return count;
 		}
 		sysfs_remove_file(iccom->p->channels_root, &channel_attr.attr);
 		
-		sysfs_result = iccom_test_sysfs_ch_del_by_iccom(iccom, ch_id);
+		ssize_t sysfs_result = iccom_test_sysfs_ch_del_by_iccom(iccom, ch_id);
 		if (sysfs_result != 0) {
 			iccom_err("Sysfs channel list removal failed");
 			return sysfs_result;
 		}
 	} else {
-		iccom_err("Sysfs channel operation shall be either a c or d");
+		iccom_err("Sysfs channel operation shall be either a %c or %c",
+			ICCOM_SYSFS_CREATE_CHANNEL, ICCOM_SYSFS_DELETE_CHANNEL);
 		return -EINVAL;
 	}
 
@@ -5730,20 +5729,6 @@ static struct class iccom_class = {
 	.class_groups = iccom_class_groups
 };
 
-// Registers the ICCom class for sysfs
-//
-// RETURNS:
-//      0: ok
-//      !0: nok
-int iccom_test_sysfs_iccom_class_register(void) {
-	return class_register(&iccom_class);
-};
-
-// Unregisters the ICCom class for sysfs
-void iccom_test_sysfs_iccom_class_unregister(void) {
-	class_unregister(&iccom_class);
-};
-
 // Iccom device probe which initializes the device
 // and allocates the iccom_dev
 //
@@ -5752,59 +5737,28 @@ void iccom_test_sysfs_iccom_class_unregister(void) {
 // RETURNS:
 //      0: ok
 //     <0: errors
-static int iccom_probe(struct platform_device *pdev) {
-	struct iccom_dev *iccom;
-
-	if (IS_ERR_OR_NULL(pdev)) {
-		iccom_err("Probing a Iccom Device failed - pdev NULL pointer!");
-		return -EINVAL;
-	}
+static int iccom_probe(struct platform_device *pdev)
+{
+	ICCOM_CHECK_PTR(pdev, return -ENODEV);
 
 	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
 			"Probing a Iccom Device with id: %d", pdev->id);
 
-	iccom = (struct iccom_dev *)
+	struct iccom_dev *iccom = (struct iccom_dev *)
 				kmalloc(sizeof(struct iccom_dev), GFP_KERNEL);
 
 	ICCOM_CHECK_DEVICE("Failed to allocate the memory.", return -ENOMEM);
 
 	dev_set_drvdata(&pdev->dev, iccom);
 
-	ssize_t ret = iccom_init(iccom);
+	int ret = iccom_init(iccom, pdev);
 
 	if (ret != 0) {
 		iccom_err("iccom_init failed");
-		goto init_failed;
+		kfree(iccom);
+		iccom = NULL;
+		dev_set_drvdata(&pdev->dev, NULL);
 	}
-
-	mutex_init(&iccom->p->sysfs_test_ch_lock);
-
-	ret = iccom_test_sysfs_initialize_ch_list(iccom);
-
-	if (ret != 0) {
-		iccom_err("Sysfs Channel List initialization failed");
-		goto ch_init_failed;
-	}
-
-	// Create sysfs channels root directory to hold sysfs channels
-	iccom->p->channels_root = kobject_create_and_add(
-						ICCOM_TEST_SYSFS_CHANNEL_ROOT,
-						&(pdev->dev.kobj));
-
-	if (IS_ERR_OR_NULL(iccom->p->channels_root)) {
-		iccom_err("Sysfs channel failed to create channel root");
-		ret = -EFAULT;
-		goto ch_init_failed;
-
-	}
-
-	return 0;
-
-ch_init_failed:
-	iccom_close_binded(iccom);
-init_failed:
-	kfree(iccom);
-	iccom = NULL;
 	return ret;
 };
 
@@ -5816,32 +5770,23 @@ init_failed:
 // RETURNS:
 //      0: ok
 //     <0: errors
-static int iccom_remove(struct platform_device *pdev) {
-
-	struct iccom_dev *iccom;
-
-	if (IS_ERR_OR_NULL(pdev)) {
-		iccom_err("Iccom pdev is null.");
-		return -EFAULT;
-	}
+static int iccom_remove(struct platform_device *pdev)
+{
+	ICCOM_CHECK_PTR(pdev, return -ENODEV);
 
 	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
 			"Removing a Iccom Device with id: %d", pdev->id);
 
-	iccom = (struct iccom_dev *)dev_get_drvdata(&pdev->dev);
-
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(&pdev->dev);
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 
-	iccom_test_sysfs_ch_del(iccom);
-	if (!IS_ERR_OR_NULL(iccom->p) && 
-			!IS_ERR_OR_NULL(iccom->p->channels_root)) {
-		kobject_put(iccom->p->channels_root);
-		iccom->p->channels_root = NULL;
-	}
-	iccom_close_binded(iccom);
+	iccom_info_raw(ICCOM_LOG_INFO_KEY_LEVEL, "Closing ICCom device");
+	iccom_delete(iccom);
+	iccom_unbind_xfer_device(iccom);
 	
 	kfree(iccom);
 	iccom = NULL;
+	dev_set_drvdata(&pdev->dev, NULL);
 
 	return 0;
 };
@@ -5892,9 +5837,21 @@ static int __init iccom_module_init(void)
 	ida_init(&iccom_dev_id);
 
 	ret = platform_driver_register(&iccom_driver);
-	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
-				"Iccom Driver Register result: %d", ret);
-	iccom_test_sysfs_iccom_class_register();
+	if (ret != 0) {
+		iccom_err("Registering iccom module has failed in the"
+				"driver registration");
+		return ret;
+	}
+
+	ret = class_register(&iccom_class);
+	if (ret != 0) {
+		iccom_err("Registering the iccom class has has failed"
+				"with error %d.", ret);
+		ida_destroy(&iccom_dev_id);
+		platform_driver_unregister(&iccom_driver);
+
+		return ret;
+	}
 
 	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "module loaded");
 	return ret;
@@ -5911,7 +5868,7 @@ static void __exit iccom_module_exit(void)
 {
 	ida_destroy(&iccom_dev_id);
 
-	iccom_test_sysfs_iccom_class_unregister();
+	class_unregister(&iccom_class);
 
 	platform_driver_unregister(&iccom_driver);
 

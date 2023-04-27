@@ -468,7 +468,7 @@ static void __iccom_test_destroy_binded_iccom(
                 , struct iccom_dev *iccom)
 {
         iccom_print_statistics(iccom);
-        iccom_close(iccom);
+        iccom_delete(iccom);
         iccom_test_info_raw("closing transport device");
         full_duplex_if->close(iccom->xfer_device);
 }
