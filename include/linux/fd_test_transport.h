@@ -30,11 +30,11 @@
 // defines the sysfs enabling value to create the
 // RW files for iccom transport test manipulation
 // via user space
-#define FD_TT_SYSFS_CREATE_RW_FILES 1U
+#define FD_TT_SYSFS_CREATE_RW_FILES 'c'
 // defines the sysfs disabling value to remove the
 // RW files for iccom transport test manipulation
 // via user space
-#define FD_TT_SYSFS_REMOVE_RW_FILES 0U
+#define FD_TT_SYSFS_DELETE_RW_FILES 'd'
 
 #define FD_TEST_TRANSPORT_HEADER
 

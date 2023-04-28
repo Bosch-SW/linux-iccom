@@ -48,6 +48,9 @@
 // defines the sysfs destroy channel character
 // to be used to destroy channels
 #define ICCOM_SYSFS_DELETE_CHANNEL 'd'
+// defines the sysfs set channel character
+// to be used to set the channel to be read or written
+#define ICCOM_SYSFS_SET_CHANNEL 's'
 
 // maximum size for sysfs channel store command
 #define ICCOM_TEST_SYSFS_CH_CMD_MAX_CHAR			25U

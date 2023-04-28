@@ -781,7 +781,7 @@ ssize_t fd_tt_iccom_convert_byte_array_to_hex_str(
 // RETURNS:
 //      0: No data
 //      > 0: size of data to be showed in user space
-static ssize_t R_show(
+static ssize_t transport_RW_show(
 		struct device *dev, struct device_attribute *attr, char *buf)
 {
 	FD_TT_CHECK_PTR(dev, return -EFAULT)
@@ -814,8 +814,6 @@ static ssize_t R_show(
 	return length;
 }
 
-static DEVICE_ATTR_RO(R);
-
 // Transport device W (store) attribute for writing
 // data from userspace to the transport
 //
@@ -828,7 +826,7 @@ static DEVICE_ATTR_RO(R);
 // RETURNS:
 //  count: ok
 //    < 0: errors
-static ssize_t W_store(
+static ssize_t transport_RW_store(
 		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
@@ -903,7 +901,7 @@ hex_buffer_clean_up:
 	return ret;
 }
 
-static DEVICE_ATTR_WO(W);
+static DEVICE_ATTR_RW(transport_RW);
 
 // Show RW (store) attribute, for creating
 // or destroying the R and W files on
@@ -917,55 +915,54 @@ static DEVICE_ATTR_WO(W);
 // RETURNS:
 //  count: ok
 //    < 0: errors
-static ssize_t showRW_ctl_store(
+static ssize_t transport_ctl_store(
 		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	unsigned int result;
-
-	if (kstrtouint(buf, 10, &result) != 0) {
-		fd_tt_err("Value received is not an unsigned int.");
-		return -EINVAL;
+	if (count == 0 || count > 1) {
+		goto wrong_usage;
 	}
+
+	char option = buf[0];
 	
-	if (result == FD_TT_SYSFS_CREATE_RW_FILES) {	
-		if (!IS_ERR_OR_NULL(sysfs_get_dirent(dev->kobj.sd,"R")) ||
-			 !IS_ERR_OR_NULL(sysfs_get_dirent(dev->kobj.sd,"W"))) {
+	if (option == FD_TT_SYSFS_CREATE_RW_FILES) {
+		if (!IS_ERR_OR_NULL(sysfs_get_dirent(dev->kobj.sd, "transport_RW"))) {
 			fd_tt_err("Files already exist");
 			return -EINVAL;
 		}
 
-		if (device_create_file(dev, &dev_attr_R) != 0) {
-			fd_tt_err("Error creating the R file.");
+		if (device_create_file(dev, &dev_attr_transport_RW) != 0) {
+			fd_tt_err("Error creating the transport_RW file.");
 			return -EINVAL;
 		}
-
-		if (device_create_file(dev, &dev_attr_W) != 0) {
-			device_remove_file(dev, &dev_attr_R);
-			fd_tt_err("Error creating the W file.");
-			return -EINVAL;
-		}
-	} else if (result == FD_TT_SYSFS_REMOVE_RW_FILES) {
-		device_remove_file(dev,&dev_attr_R);
-		device_remove_file(dev,&dev_attr_W);
+	} else if (option == FD_TT_SYSFS_DELETE_RW_FILES) {
+		device_remove_file(dev, &dev_attr_transport_RW);
 	} else {
-		fd_tt_err("RW Files: enable (%d) / disable %d"
-					, FD_TT_SYSFS_CREATE_RW_FILES
-					, FD_TT_SYSFS_REMOVE_RW_FILES);
-		return -EINVAL;
+		goto wrong_usage;
 	}
 
 	return count;
+
+wrong_usage:
+	fd_tt_err("Sysfs transport ctl format error!\n"
+			"x where x - is one of [%c;%c]\n"
+			"(%c - creates sysfs RW files for transport"
+			"%c - deletes sysfs RW files for transport)\n",
+			FD_TT_SYSFS_CREATE_RW_FILES,
+			FD_TT_SYSFS_DELETE_RW_FILES,
+			FD_TT_SYSFS_CREATE_RW_FILES,
+			FD_TT_SYSFS_DELETE_RW_FILES);
+	return -EINVAL;
 }
 
-static DEVICE_ATTR_WO(showRW_ctl);
+static DEVICE_ATTR_WO(transport_ctl);
 
 // List of all Transport device attributes
 //
-// @dev_attr_showRW_ctl the Transport file to create
+// @dev_attr_transport_ctl the Transport file to create
 //                      or delete the R and W files
 static struct attribute *fd_test_transport_dev_attrs[] = {
-	&dev_attr_showRW_ctl.attr,
+	&dev_attr_transport_ctl.attr,
 	NULL,
 };
 
@@ -1187,7 +1184,6 @@ static int fd_tt_probe(struct platform_device *pdev)
 //     <0: errors
 static int fd_tt_remove(struct platform_device *pdev)
 {
-
 	if (IS_ERR_OR_NULL(pdev)) {
 		fd_tt_warning("Transport test device pdev is null.");
 		return -EFAULT;
@@ -1216,7 +1212,9 @@ static int fd_tt_remove(struct platform_device *pdev)
 
 	kfree(full_duplex_dev);
 	full_duplex_dev = NULL;
-
+	
+	device_remove_file(&pdev->dev, &dev_attr_transport_RW);
+	
 	fd_tt_info(FD_TT_LOG_INFO_DBG_LEVEL,
 			"Successfully removed the Full Duplex"
 			" Test Transport device with id: %d", pdev->id);

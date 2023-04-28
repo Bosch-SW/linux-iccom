@@ -843,11 +843,15 @@ struct iccom_error_rec {
 //      ICCom statistics info to user space)
 // @statistics_file the file in proc fs which provides the ICCom
 //      statistics to user space.
-// @channels_root it has the sysfs channel folder kobject holding all
-//      sysfs channels associated with an iccom device
+// @sysfs_test_ch_rw_in_use {unsigned int} sysfs channel that will be
+//      used to write data from userspace or read data to userspace.
+//      Userpace shall set the sysfs test channel before the read or write
+//      via channels_ctl sysfs file
 // @sysfs_test_ch_head the list which shall hold the user space channels
 //      received data from iccom received from transport to send to
 //      upper layers
+// @sysfs_test_ch_lock mutex to protect the sysfs channels from from data
+//      races.
 struct iccom_dev_private {
 	struct iccom_dev *iccom;
 
@@ -878,7 +882,7 @@ struct iccom_dev_private {
 
 	struct iccom_error_rec errors[ICCOM_ERROR_TYPES_COUNT];
 
-	struct kobject* channels_root;
+	unsigned int sysfs_test_ch_rw_in_use;
 
 	struct list_head sysfs_test_ch_head;
 
@@ -4596,18 +4600,6 @@ int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
 		goto iccom_test_sysfs_destroy_iccom;
 	}
 
-	// Create sysfs channels root directory to hold sysfs channels
-	iccom->p->channels_root = kobject_create_and_add(
-						ICCOM_TEST_SYSFS_CHANNEL_ROOT,
-						&(pdev->dev.kobj));
-
-	if (IS_ERR_OR_NULL(iccom->p->channels_root)) {
-		iccom_err("Sysfs channel failed to create channel root");
-		res = -EFAULT;
-		goto iccom_test_sysfs_destroy_iccom;
-
-	}
-
 	return 0;
 
 iccom_test_sysfs_destroy_iccom:
@@ -4791,10 +4783,6 @@ void iccom_delete(struct iccom_dev *iccom)
 	__iccom_queue_free(iccom);
 
 	iccom_test_sysfs_ch_del(iccom);
-	if (!IS_ERR_OR_NULL(iccom->p->channels_root)) {
-		kobject_put(iccom->p->channels_root);
-		iccom->p->channels_root = NULL;
-	}
 	mutex_destroy(&iccom->p->sysfs_test_ch_lock);
 
 	iccom->p->iccom = NULL;
@@ -5532,33 +5520,25 @@ static DEVICE_ATTR_RO(statistics);
 // Channel (show) attribute, for reading data
 // written to the channel
 //
-// @kobj {valid ptr} channel kobject instance
-// @attr {valid ptr} kobject attribute properties
-// @buf {valid ptr} buffer to read input from user space
+// @dev {valid ptr} iccom device
+// @attr {valid ptr} device attribute properties
+// @buf {valid ptr} buffer to write output to user space
 //
 // RETURNS:
 //      0: no data to be displayed
 //    > 0: size of data to be showed in user space
 //    < 0: errors
-static ssize_t channel_show(
-		struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t channels_RW_show(
+		struct device *dev, struct device_attribute *attr, char *buf)
 {
 	ICCOM_CHECK_PTR(buf, return -EINVAL);
-	ICCOM_CHECK_PTR(kobj->parent, return -EFAULT);
 
-	struct device *iccom_dev = kobj_to_dev(kobj->parent);
-
-	ICCOM_CHECK_PTR(iccom_dev, return -EFAULT);
-
-	struct iccom_dev *iccom = (struct iccom_dev*)dev_get_drvdata(iccom_dev);
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
 
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
+	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
 
-	unsigned ch_id = 0;
-	if (kstrtouint(attr->attr.name, 10, &ch_id) != 0) {
-		iccom_err("Sysfs channel id is not an unsigned int, given: %s", attr->attr.name);
-		return -EINVAL;
-	}
+	unsigned int ch_id = iccom->p->sysfs_test_ch_rw_in_use;
 
 	return iccom_test_sysfs_ch_pop_msg_by_ch_id(iccom, ch_id,
 							 buf, PAGE_SIZE);
@@ -5567,7 +5547,7 @@ static ssize_t channel_show(
 // Channel (store) attribute, for writing data
 // to a channel
 //
-// @kobj {valid ptr} channel kobject instance
+// @dev {valid ptr} iccom device
 // @attr {valid ptr} class attribute properties
 // @buf {valid ptr} buffer to read input from user space
 // @count {number} size of buffer from user space
@@ -5575,26 +5555,18 @@ static ssize_t channel_show(
 // RETURNS:
 //  count: ok
 //    < 0: errors
-static ssize_t channel_store(
-		struct kobject *kobj, struct kobj_attribute *attr,
+static ssize_t channels_RW_store(
+		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
 	ICCOM_CHECK_PTR(buf, return -EINVAL);
-	ICCOM_CHECK_PTR(kobj->parent, return -EFAULT);
 
-	unsigned ch_id = 0;
-	if (kstrtouint(attr->attr.name, 10, &ch_id) != 0) {
-		iccom_err("Sysfs channel id is not an unsigned int, given: %s", attr->attr.name);
-		return -EINVAL;
-	}
-
-	struct device *iccom_dev = kobj_to_dev(kobj->parent);
-
-	ICCOM_CHECK_PTR(iccom_dev, return -EFAULT);
-
-	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(iccom_dev);
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
 
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
+	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
+
+	unsigned int ch_id = iccom->p->sysfs_test_ch_rw_in_use;
 
 	int ret = iccom_post_message(
 		iccom,
@@ -5611,6 +5583,8 @@ static ssize_t channel_store(
 
 	return count;
 }
+
+static DEVICE_ATTR_RW(channels_RW);
 
 // Channel control (store) attribute, for creating or
 // destroying channel instances
@@ -5634,72 +5608,47 @@ static ssize_t channels_ctl_store(
 	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
 	
-	ICCOM_CHECK_PTR(iccom->p->channels_root, return -EFAULT);
-
 	char option;
 	unsigned int ch_id;
 	if (2 != sscanf(buf,"%c%u", &option, &ch_id)) {
-		iccom_err("Sysfs channel ctl format error!\n"
-				"xN where x - is one of [c;d]\n"
-				"(c - creates debug channel"
-				"d - deletes debug channel)\n"
-				"N - is the channel number\n");
-		return -EINVAL;
+		goto wrong_usage;
 	}
 
-	static char channel_name[ICCOM_TEST_SYSFS_CH_CMD_MAX_CHAR+1];
-	scnprintf(channel_name, sizeof(channel_name), "%d", ch_id);
-
-	struct kernfs_node *knode = sysfs_get_dirent(
-						iccom->p->channels_root->sd,
-						channel_name);
-
-	static struct kobj_attribute channel_attr = {
-		.attr = {
-			.name = channel_name, 
-			.mode = ICCOM_TEST_SYSFS_CHANNEL_PERMISSIONS },
-		.show = channel_show,
-		.store = channel_store,
-	};
-
 	if (option == ICCOM_SYSFS_CREATE_CHANNEL) {
-		if (!IS_ERR_OR_NULL(knode)) {
-			iccom_err("Sysfs channel creation requested but ignored"
-					" as sysfs channel already exists.");
-			return count;
-		}
-		if (sysfs_create_file(iccom->p->channels_root,
-						&channel_attr.attr) != 0) {
-			iccom_err("Sysfs channel file creation failed");
-			return -EINVAL;
-		}
-
-		ssize_t sysfs_result = iccom_test_sysfs_ch_add_by_iccom(iccom, ch_id);
-		if (sysfs_result != 0) {
-			iccom_err("Sysfs channel list add failed");
-			sysfs_remove_file(iccom->p->channels_root, &channel_attr.attr);
-			return sysfs_result;
+		ssize_t ret = iccom_test_sysfs_ch_add_by_iccom(iccom, ch_id);
+		if (ret != 0) {
+			iccom_err("Adding sysfs channel %d failed", ch_id);
+			return ret;
 		}
 	} else if (option == ICCOM_SYSFS_DELETE_CHANNEL) {
-		if (IS_ERR_OR_NULL(knode)) {
-			iccom_err("Sysfs channel deletion requested but ignored"
-					" as sysfs channel does not exist.");
-			return count;
+		ssize_t ret = iccom_test_sysfs_ch_del_by_iccom(iccom, ch_id);
+		if (ret != 0) {
+			iccom_err("Removing sysfs channel %d failed", ch_id);
+			return ret;
 		}
-		sysfs_remove_file(iccom->p->channels_root, &channel_attr.attr);
-		
-		ssize_t sysfs_result = iccom_test_sysfs_ch_del_by_iccom(iccom, ch_id);
-		if (sysfs_result != 0) {
-			iccom_err("Sysfs channel list removal failed");
-			return sysfs_result;
-		}
+	}
+	else if(option == ICCOM_SYSFS_SET_CHANNEL) {
+		iccom->p->sysfs_test_ch_rw_in_use = ch_id;
 	} else {
-		iccom_err("Sysfs channel operation shall be either a %c or %c",
-			ICCOM_SYSFS_CREATE_CHANNEL, ICCOM_SYSFS_DELETE_CHANNEL);
-		return -EINVAL;
+		goto wrong_usage;
 	}
 
 	return count;
+
+wrong_usage:
+	iccom_err("Sysfs channel ctl format error!\n"
+			"xN where x - is one of [%c;%c;%c]\n"
+			"(%c - creates debug channel"
+			"%c - deletes debug channel"
+			"%c - set the debug channel)\n"
+			"where N - is the channel number\n",
+			ICCOM_SYSFS_CREATE_CHANNEL,
+			ICCOM_SYSFS_DELETE_CHANNEL,
+			ICCOM_SYSFS_SET_CHANNEL,
+			ICCOM_SYSFS_CREATE_CHANNEL,
+			ICCOM_SYSFS_DELETE_CHANNEL,
+			ICCOM_SYSFS_SET_CHANNEL);
+	return -EINVAL;
 }
 
 static DEVICE_ATTR_WO(channels_ctl);
@@ -5713,6 +5662,7 @@ static struct attribute *iccom_dev_attrs[] = {
 	&dev_attr_transport.attr,
 	&dev_attr_statistics.attr,
 	&dev_attr_channels_ctl.attr,
+	&dev_attr_channels_RW.attr,
 	NULL,
 };
 
