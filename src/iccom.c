@@ -421,7 +421,7 @@
 		error_action;						\
 	}
 #define ICCOM_CHECK_CLOSING(msg, closing_action)			\
-	if (iccom->p->closing) {					\
+	if (iccom->p->closing.counter) {					\
 		iccom_warning("%s: device is closing; "msg"\n"		\
 			      , __func__);				\
 		closing_action;						\
@@ -692,7 +692,8 @@ struct iccom_message_storage
 	iccom_msg_ready_callback_ptr_t message_ready_global_callback;
 	void *global_consumer_data;
 
-	int uncommitted_finalized_count;
+
+	atomic_t uncommitted_finalized_count;
 };
 
 // Iccom device statistics
@@ -724,7 +725,7 @@ struct iccom_dev_statistics {
 	unsigned long long messages_received_ok;
 	unsigned long packages_in_tx_queue;
 	unsigned long long total_consumers_bytes_received_ok;
-	unsigned long messages_ready_in_storage;
+	atomic_long_t messages_ready_in_storage;
 
 // TODO:
 //	unsigned long long packets_sent;
@@ -876,7 +877,7 @@ struct iccom_dev_private {
 #endif
 	struct work_struct consumer_delivery_work;
 
-	bool closing;
+	atomic_t closing;
 
 	struct iccom_dev_statistics statistics;
 
@@ -2743,7 +2744,7 @@ void iccom_msg_storage_clear(struct iccom_message_storage *storage)
 		__iccom_msg_storage_free_channel(
 			__iccom_msg_storage_anchor2channel(first));
 	}
-	storage->uncommitted_finalized_count = 0;
+	atomic_set(&storage->uncommitted_finalized_count, 0);
 	mutex_unlock(&storage->lock);
 	storage->message_ready_global_callback = NULL;
 	storage->global_consumer_data = NULL;
@@ -2849,7 +2850,7 @@ int iccom_msg_storage_append_data_to_message(
 	
 	if (final) {
 		msg->finalized = true;
-		__sync_add_and_fetch(&storage->uncommitted_finalized_count, 1);
+		atomic_add(1, &storage->uncommitted_finalized_count);
 	}
 
 	return 0;
@@ -3039,7 +3040,7 @@ static void iccom_msg_storage_commit(
 			    , channel_anchor) {
 		__iccom_msg_storage_channel_commit(channel_rec);
 	}
-	storage->uncommitted_finalized_count = 0;
+	atomic_set(&storage->uncommitted_finalized_count, 0);
 	mutex_unlock(&storage->lock);
 }
 
@@ -3056,7 +3057,7 @@ static int iccom_msg_storage_init(
 #endif
 	INIT_LIST_HEAD(&storage->channels_list);
 	mutex_init(&storage->lock);
-	storage->uncommitted_finalized_count = 0;
+	atomic_set(&storage->uncommitted_finalized_count, 0);
 	storage->message_ready_global_callback = NULL;
 	storage->global_consumer_data = NULL;
 	storage->iccom = container_of(storage
@@ -3075,7 +3076,7 @@ static inline int iccom_msg_storage_uncommitted_finalized_count(
 #ifdef ICCOM_DEBUG
 	ICCOM_MSG_STORAGE_CHECK_STORAGE("", return -ENODEV);
 #endif
-	return storage->uncommitted_finalized_count;
+	return storage->uncommitted_finalized_count.counter;
 }
 
 /* -------------------------- UTILITIES ---------------------------------*/
@@ -3891,9 +3892,8 @@ static int __iccom_process_package_payload(
 	iccom->p->statistics.messages_received_ok += finalized;
 	iccom->p->statistics.total_consumers_bytes_received_ok
 			+= consumer_bytes_parsed_total;
-	__sync_add_and_fetch(
-			&iccom->p->statistics.messages_ready_in_storage
-			, finalized);
+	atomic_long_add(finalized,
+			&iccom->p->statistics.messages_ready_in_storage);
 
 	if (finalized > 0) {
 		// notify consumer if there is any new ready messages
@@ -4140,9 +4140,8 @@ static void __iccom_consumer_notification_routine(
 	int passed = iccom_msg_storage_pass_ready_data_to_consumer(
 					     &iccom_p->rx_messages);
 	if (passed >= 0) {
-		__sync_add_and_fetch(
-			    &iccom_p->statistics.messages_ready_in_storage
-			    , -passed);
+		atomic_long_add(-passed,
+			&iccom_p->statistics.messages_ready_in_storage);
 	}
 }
 
@@ -4188,6 +4187,29 @@ static inline void __iccom_free_packages_storage(struct iccom_dev *iccom)
 	}
 	mutex_unlock(&iccom->p->tx_queue_lock);
 	mutex_destroy(&iccom->p->tx_queue_lock);
+}
+
+// Helper. Initializes the statistics structure of ICCom.
+// NOTE: the ICCom sysfs should be created beforehand
+static inline void __iccom_statistics_init(struct iccom_dev *iccom)
+{
+	ICCOM_CHECK_DEVICE("", return);
+	ICCOM_CHECK_DEVICE_PRIVATE("", return);
+
+	// initial statistics data
+	iccom->p->statistics.transport_layer_xfers_done_count = 0;
+	iccom->p->statistics.raw_bytes_xfered_via_transport_layer = 0;
+	iccom->p->statistics.packages_xfered = 0;
+	iccom->p->statistics.packages_sent_ok = 0;
+	iccom->p->statistics.packages_received_ok = 0;
+	iccom->p->statistics.packages_bad_data_received = 0;
+	iccom->p->statistics.packages_duplicated_received = 0;
+	iccom->p->statistics.packages_parsing_failed = 0;
+	iccom->p->statistics.packets_received_ok = 0;
+	iccom->p->statistics.messages_received_ok = 0;
+	iccom->p->statistics.packages_in_tx_queue = 0;
+	iccom->p->statistics.total_consumers_bytes_received_ok = 0;
+	atomic_long_set(&iccom->p->statistics.messages_ready_in_storage, 0);
 }
 
 /* -------------------------- KERNEL SPACE API --------------------------*/
@@ -4488,8 +4510,8 @@ int iccom_read_message(struct iccom_dev *iccom
 		return 0;
 	}
 
-	__sync_add_and_fetch(
-		    &iccom->p->statistics.messages_ready_in_storage, -1);
+	atomic_long_add(-1,
+			&iccom->p->statistics.messages_ready_in_storage);
 
 	*msg_data_ptr__out = msg->data;
 	*buf_size__out = msg->length;
@@ -4531,7 +4553,7 @@ int iccom_read_message(struct iccom_dev *iccom
 //      0 on success
 //      negative error code on error
 __maybe_unused
-int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
+int iccom_init(struct iccom_dev *iccom)
 {
 	ICCOM_CHECK_DEVICE("struct ptr broken", return -ENODEV);
 
@@ -4550,6 +4572,7 @@ int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
 	iccom->xfer_device = NULL;
 	memset(&iccom->xfer_iface, 0, sizeof(struct full_duplex_sym_iface));
 
+	__iccom_statistics_init(iccom);
 	__iccom_error_report_init(iccom);
 
 	res = iccom_msg_storage_init(&iccom->p->rx_messages);
@@ -4589,7 +4612,7 @@ int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
 	INIT_WORK(&iccom->p->consumer_delivery_work
 		  , __iccom_consumer_notification_routine);
 
-	iccom->p->closing = false;
+	atomic_set(&iccom->p->closing, 0);
 
 	mutex_init(&iccom->p->sysfs_test_ch_lock);
 
@@ -4728,8 +4751,8 @@ void iccom_print_statistics(struct iccom_dev *iccom)
 		       , "MESSAGES: received OK:\t%llu"
 		       , iccom->p->statistics.messages_received_ok);
 	iccom_info_raw(ICCOM_LOG_INFO_KEY_LEVEL
-		       , "MESSAGES: ready in RX storage:\t%lu"
-		       , iccom->p->statistics.messages_ready_in_storage);
+		       , "MESSAGES: ready in RX storage:\t%lld"
+		       , iccom->p->statistics.messages_ready_in_storage.counter);
 	iccom_info_raw(ICCOM_LOG_INFO_KEY_LEVEL
 		       , "BANDWIDTH: total consumer bytes received OK:\t%llu"
 		       , iccom->p->statistics.total_consumers_bytes_received_ok);
@@ -4752,12 +4775,10 @@ void iccom_delete(struct iccom_dev *iccom)
 	// only one close sequence may run at the same time
 	// turning this flag will block all further external
 	// calls to given ICCom instance
-	bool expected_state = false;
-	bool dst_state = true;
-	bool res = __atomic_compare_exchange_n(&iccom->p->closing
-			, &expected_state, dst_state, false
-			, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-	if (!res) {
+	int expected_state = 0;
+	int dst_state = 1;
+	if (atomic_cmpxchg(&iccom->p->closing
+					, expected_state, dst_state) != expected_state) {
 		iccom_err("iccom is already closing now");
 		return;
 	}
@@ -5277,18 +5298,18 @@ static ssize_t delete_iccom_store(
 
 	(void)iccom_test_sysfs_trim_buffer(device_name, count);
 
-	struct device *platform_device = 
+	struct device *iccom_device = 
 		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
 	kfree(device_name);
 	device_name = NULL;
 
-	if (IS_ERR_OR_NULL(platform_device)) {
+	if (IS_ERR_OR_NULL(iccom_device)) {
 		iccom_err("Iccom device is null.");
 		return -EFAULT;
 	}
 
-	platform_device_unregister(to_platform_device(platform_device));
+	platform_device_unregister(to_platform_device(iccom_device));
 
 	return count;
 }
@@ -5392,19 +5413,19 @@ static ssize_t transport_store(
 
 	(void)iccom_test_sysfs_trim_buffer(device_name, count);
 
-	struct device *platform_device = 
+	struct device *fd_tt_dev = 
 		bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
 	kfree(device_name);
 	device_name = NULL;
 
-	if (IS_ERR_OR_NULL(platform_device)) {
+	if (IS_ERR_OR_NULL(fd_tt_dev)) {
 		iccom_err("Transport test device is null.");
 		return -EFAULT;
 	}
 
 	struct full_duplex_device *full_duplex_dev = 
-		(struct full_duplex_device *) dev_get_drvdata(platform_device);
+		(struct full_duplex_device *) dev_get_drvdata(fd_tt_dev);
 
 	if (IS_ERR_OR_NULL(full_duplex_dev)) {
 		iccom_err("The given transport device has not been found: %s",
@@ -5418,36 +5439,38 @@ static ssize_t transport_store(
 	}
 
 	struct device_link *link_downwards = iccom_add_device_link_dependency(dev,
-						 platform_device);
+						fd_tt_dev);
 
 	if (IS_ERR_OR_NULL(link_downwards)) {
 		iccom_err("Unable to create link for transport device %s",
-							dev_name(platform_device));
+							dev_name(fd_tt_dev));
 		return -EFAULT;
 	}
 
-	ssize_t ret = iccom_bind_xfer_device(iccom,
+	int ret = iccom_bind_xfer_device(iccom,
 					full_duplex_dev->iface,
-					(void*)platform_device);
+					(void*)fd_tt_dev);
 
 	if (ret != 0) {
 		iccom_err("Iccom transport device binding failed.");
-		device_link_del(link_downwards);
-		return -EINVAL;
+		goto device_link_deletion;
 	}
 	
 	ret = iccom_start(iccom);
 	if (ret < 0) {
 		iccom_err("ICCom driver start failed, "
-			  "err: %ld", ret);
-
-		return ret;
+			"err: %d", ret);
+		goto device_link_deletion;
 	}
 
 	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL
-		   , "iccom & full duplex device binded sucessfully");
+		 , "iccom & full duplex device binded sucessfully");
 
 	return count;
+
+device_link_deletion:
+	device_link_del(link_downwards);
+	return ret;
 }
 
 static DEVICE_ATTR_RW(transport);
@@ -5489,7 +5512,7 @@ static ssize_t statistics_show(
 			"packages: in tx queue:  %lu\n"
 			"packets: received ok:  %llu\n"
 			"messages: received ok:  %llu\n"
-			"messages: ready rx:  %lu\n"
+			"messages: ready rx:  %lld\n"
 			"bandwidth: consumer bytes received:\t%llu\n"
 			"\n"
 			"Note: this is only general statistical/monitoring"
@@ -5509,7 +5532,7 @@ static ssize_t statistics_show(
 			,stats->packages_in_tx_queue
 			,stats->packets_received_ok
 			,stats->messages_received_ok
-			,stats->messages_ready_in_storage
+			,stats->messages_ready_in_storage.counter
 			,stats->total_consumers_bytes_received_ok);
 
 	return len;
@@ -5541,7 +5564,7 @@ static ssize_t channels_RW_show(
 	unsigned int ch_id = iccom->p->sysfs_test_ch_rw_in_use;
 
 	return iccom_test_sysfs_ch_pop_msg_by_ch_id(iccom, ch_id,
-							 buf, PAGE_SIZE);
+							buf, PAGE_SIZE);
 }
 
 // Channel (store) attribute, for writing data
@@ -5679,6 +5702,74 @@ static struct class iccom_class = {
 	.class_groups = iccom_class_groups
 };
 
+static int iccom_device_tree_node_setup(struct platform_device *pdev, 
+				struct iccom_dev *iccom)
+{
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
+			"Probing an Iccom via DT with id: %d", pdev->id);
+
+	struct device_node *iccom_dt_node = pdev->dev.of_node;
+
+	struct device_node *transport_dt_node = of_parse_phandle(iccom_dt_node, 
+								"transport_dev", 0);
+	if (IS_ERR_OR_NULL(transport_dt_node)) {
+		iccom_err("transport_dev property is not defined or valid");
+		return -EINVAL;
+	}
+
+	struct platform_device *transport_pdev = 
+				of_find_device_by_node(transport_dt_node);
+	of_node_put(transport_dt_node);
+	if (IS_ERR_OR_NULL(transport_pdev)) {
+		iccom_err("Unable to find Transport from specified node");
+		return -ENODEV;
+	}
+
+	struct full_duplex_device *full_duplex_dev = 
+		(struct full_duplex_device *) dev_get_drvdata(&transport_pdev->dev);
+	
+	if (IS_ERR_OR_NULL(full_duplex_dev)) {
+		iccom_err("Unable to get transport device specified by "
+				 "device tree node");
+		return -EPROBE_DEFER;
+	}
+
+	if (IS_ERR_OR_NULL(full_duplex_dev->iface)) {
+		iccom_err("Transport device data iface is null.");
+		return -EFAULT;
+	}
+
+	struct device_link *link_downwards = iccom_add_device_link_dependency(&pdev->dev,
+						&transport_pdev->dev);
+
+	if (IS_ERR_OR_NULL(link_downwards)) {
+		iccom_err("Unable to create link for transport device %s",
+							dev_name(&transport_pdev->dev));
+		return -EFAULT;
+	}
+
+	int ret = iccom_bind_xfer_device(iccom,
+					full_duplex_dev->iface,
+					(void*)&transport_pdev->dev);
+	if (ret != 0) {
+		iccom_err("Iccom transport device binding failed.");
+		goto device_link_deletion;
+	}
+	
+	ret = iccom_start(iccom);
+	if (ret < 0) {
+		iccom_err("ICCom driver start failed, "
+			  "err: %d", ret);
+		goto device_link_deletion;
+	}
+
+	return 0;
+
+device_link_deletion:
+	device_link_del(link_downwards);
+	return ret;
+}
+
 // Iccom device probe which initializes the device
 // and allocates the iccom_dev
 //
@@ -5701,14 +5792,29 @@ static int iccom_probe(struct platform_device *pdev)
 
 	dev_set_drvdata(&pdev->dev, iccom);
 
-	int ret = iccom_init(iccom, pdev);
-
+	int ret = iccom_init(iccom);
 	if (ret != 0) {
 		iccom_err("iccom_init failed");
-		kfree(iccom);
-		iccom = NULL;
-		dev_set_drvdata(&pdev->dev, NULL);
+		goto clean_iccom;
 	}
+
+	/* Device Tree Detection */
+	if (!IS_ERR_OR_NULL(pdev->dev.of_node)) {
+		ret = iccom_device_tree_node_setup(pdev, iccom);
+		if (ret != 0) {
+			iccom_err("Unable to setup device tree node: %d",
+					ret);
+			goto clean_iccom;
+		}
+		iccom_err("SUCESS: iccom_device_tree_node_setup");
+	}
+
+	return 0;
+
+clean_iccom:
+	kfree(iccom);
+	iccom = NULL;
+	dev_set_drvdata(&pdev->dev, NULL);
 	return ret;
 };
 

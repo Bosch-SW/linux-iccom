@@ -919,12 +919,11 @@ static ssize_t transport_ctl_store(
 		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	if (count == 0 || count > 1) {
+	if (count != 1) {
 		goto wrong_usage;
 	}
 
 	char option = buf[0];
-	
 	if (option == FD_TT_SYSFS_CREATE_RW_FILES) {
 		if (!IS_ERR_OR_NULL(sysfs_get_dirent(dev->kobj.sd, "transport_RW"))) {
 			fd_tt_err("Files already exist");
@@ -1163,7 +1162,7 @@ static int fd_tt_probe(struct platform_device *pdev)
 	full_duplex_dev->iface = &full_duplex_dev_iface;
 
 	dev_set_drvdata(&pdev->dev, full_duplex_dev);
-	
+
 	fd_tt_info(FD_TT_LOG_INFO_DBG_LEVEL,
 			"Successfully probed the Full Duplex"
 			" Test Transport device with id: %d", pdev->id);
@@ -1214,7 +1213,7 @@ static int fd_tt_remove(struct platform_device *pdev)
 	full_duplex_dev = NULL;
 	
 	device_remove_file(&pdev->dev, &dev_attr_transport_RW);
-	
+
 	fd_tt_info(FD_TT_LOG_INFO_DBG_LEVEL,
 			"Successfully removed the Full Duplex"
 			" Test Transport device with id: %d", pdev->id);

@@ -701,7 +701,7 @@ def iccom_check_devices_deletion(
         if (get_test_info):
             return { "test_description": ("iccom -> check sucessfull removal"
                                           " of all devices")
-                     , "test_id": "iccom_final_test.python" }
+                     , "test_id": "iccom_test_final_1.python" }
 
         device_name = params["device_name"]
         number_of_devices = params["number_of_devices"]
@@ -727,7 +727,7 @@ def fd_test_transport_check_devices_deletion(
         if (get_test_info):
             return { "test_description": ("fd_test_transport -> check sucessfull removal"
                                           " of all devices")
-                     , "test_id": "fd_test_transport_final_test.python" }
+                     , "test_id": "iccom_test_final_2.python" }
 
         device_name = params["device_name"]
         number_of_devices = params["number_of_devices"]
@@ -776,15 +776,20 @@ def iccom_stress_data_communication_with_different_channels(
         create_transport_device_RW_files(transport_dev, None)
 
         for i in range(number_of_msgs):
+            
             ch = random.randint(0,number_of_channels-1)
+            # Increment the size of question and answer
+            # which get's generated from 1 to 50 bytes of
+            # message
+            gen_char_size = i+1
             print("Test channel: " + str(ch))
 
-            question_str = "Question: " + ''.join(random.choices(string.ascii_uppercase +
-                                        string.digits, k=gen_char_size)) + "?"
+            question_str = ''.join(random.choices(string.ascii_uppercase +
+                                        string.digits, k=gen_char_size))
             question_b = question_str.encode('utf-8')
 
-            answer_str = "Answer: " + ''.join(random.choices(string.ascii_uppercase +
-                                    string.digits, k=gen_char_size)) + "!"
+            answer_str = ''.join(random.choices(string.ascii_uppercase +
+                                    string.digits, k=gen_char_size))
             answer_b = answer_str.encode('utf-8')
 
             # Send a message from ICCOM to Full Duplex Test Transport via the channel

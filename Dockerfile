@@ -5,7 +5,8 @@
 FROM bosch-linux-full-duplex-interface:latest AS iccom
 
 # Base (default) version
-ARG kernel_source_dir=/repos/linux/
+ARG kernel_source_dir_x86=/repos/linux_x86/
+ARG kernel_source_dir_arm=/repos/linux_arm/
 
 ENV repo_path=/repos/linux-iccom
 RUN rm -rf ${repo_path} && mkdir -p ${repo_path}
@@ -17,7 +18,7 @@ COPY . .
 ##  ICCom Variants Builds
 
 # Workqueue - use the system WQ
-RUN make -C ${kernel_source_dir} M=${repo_path} \
+RUN make -C ${kernel_source_dir_x86} M=${repo_path} \
         CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM \
         CONFIG_CHECK_SIGNATURE=n \
@@ -25,7 +26,7 @@ RUN make -C ${kernel_source_dir} M=${repo_path} \
 COPY . .
 
 # Workqueue - use the system high prio WQ
-RUN make -C ${kernel_source_dir} M=${repo_path} \
+RUN make -C ${kernel_source_dir_x86} M=${repo_path} \
         CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=SYSTEM_HIGHPRI \
         CONFIG_CHECK_SIGNATURE=n \
@@ -33,7 +34,7 @@ RUN make -C ${kernel_source_dir} M=${repo_path} \
 COPY . .
 
 # Workqueue - use the private highprio WQ
-RUN make -C ${kernel_source_dir} M=${repo_path} \
+RUN make -C ${kernel_source_dir_x86} M=${repo_path} \
         CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_WORKQUEUE_MODE=PRIVATE \
         CONFIG_CHECK_SIGNATURE=n \
@@ -41,7 +42,7 @@ RUN make -C ${kernel_source_dir} M=${repo_path} \
 COPY . .
 
 # Debug with embedded defaults
-RUN make -C ${kernel_source_dir} M=${repo_path} \
+RUN make -C ${kernel_source_dir_x86} M=${repo_path} \
         CONFIG_BOSCH_ICCOM=m \
         CONFIG_BOSCH_ICCOM_DEBUG=y \
         CONFIG_CHECK_SIGNATURE=n  \
@@ -49,18 +50,31 @@ RUN make -C ${kernel_source_dir} M=${repo_path} \
 COPY . .
 
 ##  ICCom & Full Duplex Test Transport Test Build
-RUN make -C ${kernel_source_dir} M=${repo_path} \
+# x86
+RUN make -C ${kernel_source_dir_x86} M=${repo_path} \
         CONFIG_BOSCH_ICCOM=m \
         CONFIG_CHECK_SIGNATURE=n \
         CONFIG_ICCOM_VERSION=$(git rev-parse HEAD) \
         CONFIG_BOSCH_FD_TEST_TRANSPORT=m
 
-# Copy Default build ko to initramfs for qemu test run
-RUN mkdir -p /builds/initramfs/content/modules/ && \
-    cp ${repo_path}/src/iccom.ko \
-    /builds/initramfs/content/modules/ && \
-    cp ${repo_path}/src/fd_test_transport.ko \
-    /builds/initramfs/content/modules/
+RUN mkdir -p ${INITRAMFS_CHROOT_X86}/modules              \
+    && cp ${repo_path}/src/fd_test_transport.ko         \
+        ${INITRAMFS_CHROOT_X86}/modules/      \
+    && cp ${repo_path}/src/iccom.ko         \
+    ${INITRAMFS_CHROOT_X86}/modules/
+
+# ARM
+RUN make ARCH=arm CROSS_COMPILE=arm-linux-gnueabi- -C ${kernel_source_dir_arm} M=${repo_path} \
+        CONFIG_BOSCH_ICCOM=m \
+        CONFIG_CHECK_SIGNATURE=n \
+        CONFIG_ICCOM_VERSION=$(git rev-parse HEAD) \
+        CONFIG_BOSCH_FD_TEST_TRANSPORT=m
+
+RUN mkdir -p ${INITRAMFS_CHROOT_ARM}/modules              \
+    && cp ${repo_path}/src/fd_test_transport.ko         \
+        ${INITRAMFS_CHROOT_ARM}/modules/      \
+    && cp ${repo_path}/src/iccom.ko         \
+    ${INITRAMFS_CHROOT_ARM}/modules/
 
 # NOTE: Run the qemu tests with the main
 #       iccom variant
@@ -71,22 +85,44 @@ FROM iccom AS iccom-test
 # Taking our test module and building it
 #
 
+ARG TEST_NAME="iccom_test"
+
+# x86
+
 # Add Python Test
 COPY test/iccom_test.py /builds/python-test/
 # Binarization and blobing of the test script into initramfs
-RUN python-to-initramfs /builds/python-test/iccom_test.py
+RUN python-to-initramfs-x86 /builds/python-test/iccom_test.py
 
-RUN run-qemu-tests
+RUN run-qemu-tests-x86
 
 # Check the expected results
-RUN <<EOF
-        grep "iccom_test_0.python: PASS" /qemu_run.log                    && \
-        grep "iccom_test_1.python: PASS" /qemu_run.log                    && \
-        grep "iccom_test_2.python: PASS" /qemu_run.log                    && \
-        grep "iccom_test_3.python: PASS" /qemu_run.log                    && \
-        grep "iccom_test_4.python: PASS" /qemu_run.log                    && \
-        grep "iccom_test_5.python: PASS" /qemu_run.log                    && \
-        grep "iccom_test_6.python: PASS" /qemu_run.log                    && \
-        grep "iccom_final_test.python: PASS" /qemu_run.log                && \
-        grep "fd_test_transport_final_test.python: PASS" /qemu_run.log
-EOF
+
+RUN grep "${TEST_NAME}_0.python: PASS" /qemu_run_x86.log
+RUN grep "${TEST_NAME}_1.python: PASS" /qemu_run_x86.log
+RUN grep "${TEST_NAME}_2.python: PASS" /qemu_run_x86.log
+RUN grep "${TEST_NAME}_3.python: PASS" /qemu_run_x86.log
+RUN grep "${TEST_NAME}_4.python: PASS" /qemu_run_x86.log
+RUN grep "${TEST_NAME}_5.python: PASS" /qemu_run_x86.log
+RUN grep "${TEST_NAME}_6.python: PASS" /qemu_run_x86.log
+RUN grep "${TEST_NAME}_final_1.python: PASS" /qemu_run_x86.log
+RUN grep "${TEST_NAME}_final_2.python: PASS" /qemu_run_x86.log
+
+# ARM
+
+# Create the dtb file
+RUN mkdir -p /builds/linux_arm/device_tree
+COPY ./device_tree/versatile-pb_iccom.dts /builds/linux_arm/device_tree
+RUN dtc -I dts -O dtb /builds/linux_arm/device_tree/versatile-pb_iccom.dts > /builds/linux_arm/device_tree/versatile-pb_iccom.dtb
+
+# Add shell Test
+RUN mkdir -p /builds/shell-tests
+COPY test/iccom_test.sh /builds/shell-tests
+RUN shell-to-initramfs-arm /builds/shell-tests/iccom_test.sh
+
+RUN run-qemu-tests-arm /builds/linux_arm/device_tree/versatile-pb_iccom.dtb
+
+# Check the expected results
+RUN grep "${TEST_NAME}_0.shell.tests: PASS" /qemu_run_arm.log
+
+RUN cat /qemu_run_arm.log
