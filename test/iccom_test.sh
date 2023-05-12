@@ -1,23 +1,39 @@
 #!/bin/sh
 set -e
 
+# Create an iccom sysfs channel
+#
+# $1 iccom device name
+# $2 sysfs channel number
 create_iccom_sysfs_channel() {
     local iccom_dev=$1
     local channel=$2
     sh -c "echo -n c${channel} > /sys/devices/platform/${iccom_dev}/channels_ctl"
 }
 
+# Create the RW sysfs files for a full duplex test device
+#
+# $1 full duplex test device name
 create_transport_device_RW_files() {
     local transport_dev=$1
     sh -c "echo -n c > /sys/devices/platform/${transport_dev}/transport_ctl"
 }
 
+# Set the iccom sysfs channel to read or write
+#
+# @iccom_dev {string} iccom device name
+# @channel {string} sysfs channel number
 set_iccom_sysfs_channel() {
     local iccom_dev=$1
     local channel=$2
     sh -c "echo -n s${channel} > /sys/devices/platform/${iccom_dev}/channels_ctl"
 }
 
+# Writes message to the given iccom sysfs channel
+#
+# $1 id of the iccom device
+# $2 the destination channel id
+# $3 message to send
 iccom_send() {
     local iccom_dev=$1
     local channel=$2
@@ -26,7 +42,15 @@ iccom_send() {
     sh -c "echo -n ${message} > /sys/devices/platform/${iccom_dev}/channels_RW"
 }
 
-check_wire_xfer () {
+# Does the wire full duplex xfer and checks if the
+# received data matches expected
+#
+# $1 iccom device name
+# $2 full duplex test device name
+# $3 the destination channel id
+# $4 the bytearray of the data to send
+# $5 bytearray we expect to receive
+check_wire_xfer() {
     local iccom_dev=$1
     local transport_dev=$2
     local channel=$3

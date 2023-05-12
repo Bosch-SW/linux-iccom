@@ -21,14 +21,11 @@
 
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <linux/proc_fs.h>
-#include <linux/uaccess.h>
 #include <linux/version.h>
+#include <linux/of_device.h>
+#include <linux/platform_device.h>
 
 #include <linux/fd_test_transport.h>
-
-#include <linux/platform_device.h>
-#include <linux/of_device.h>
 
 /* ------------- BUILD CONFIGURATION ------------- */
 
@@ -137,7 +134,7 @@
 #define FD_TT_CHECK_XFER_DEVICE(msg, error_action)			\
 	if (IS_ERR_OR_NULL(full_duplex_dev->dev)) {			\
 		fd_tt_err(						\
-			"%s: no private part of device; "msg"\n"	\
+			"%s: no device; "msg"\n"	\
 			, __func__);					\
 		error_action;						\
 	}
@@ -150,9 +147,11 @@
 	}
 /* ------------- GLOBAL VARIABLES ---------------*/
 
-// Serves to allocate unique ids for an
-// Full Duplex Test Transport platform device
-struct ida fd_test_transport_dev_id;
+// Serves to allocate unique ids for
+// creating Full Duplex Test Transport
+// platform devices trough the usage of
+// sysfs interfaces
+struct ida fd_tt_dev_id;
 
 
 /* ------------- FORWARD DECLARATIONS -------------*/
@@ -165,7 +164,6 @@ int fd_tt_default_data_update(
 				void __kernel *device,
 				struct full_duplex_xfer *xfer,
 				bool force_size_change);
-bool fd_tt_is_running(void __kernel *device);
 int fd_tt_init(
 		void __kernel *device,
 		struct full_duplex_xfer *default_xfer);
@@ -173,6 +171,7 @@ int fd_tt_reset(
 		void __kernel *device,
 		struct full_duplex_xfer *default_xfer);
 int fd_tt_close(void __kernel *device);
+bool fd_tt_is_running(void __kernel *device);
 
 /* -------------- MAIN STRUCTURES -------------*/
 
@@ -185,11 +184,14 @@ const struct full_duplex_sym_iface full_duplex_dev_iface = {
 	.close = &fd_tt_close
 };
 
-// This structure is needed for the Full Duplex Test Transport to hold
-// all the xfer device internal/private data for the transport
+// This structure holds the internal/private data belonging
+// to a Full Duplex Test Transport platform device. These 
+// structure has the information where userspace has written
+// data to perform an exchange with iccom, the next xfer id,
+// whether or not the transport is running or has finalized
 //
 // @xfer the xfer to execute data
-// @got_us_data true if for the given @xfer User Space has provided the
+// @got_us_data true if for the given @xfer userspace has provided the
 //      wire data already (this guy is being reset every new xfer).
 // @next_xfer_id contains the next xfer id 
 //      to be transmitted
@@ -205,44 +207,7 @@ struct fd_test_transport_dev {
 	bool finishing;
 };
 
-/*------------- FULL DUPLEX INTERFACE AUXILIAR -------------*/
-
-// Check whether the transport device has link dependencies
-//
-// @fd_test_transport {valid ptr} transport device to be checked
-//
-// RETURNS:
-//      0: No device link dependent
-//   != 0: There is a device link dependent
-ssize_t fd_tt_check_link_dependency(struct device *fd_test_transport)
-{
-	FD_TT_CHECK_PTR(fd_test_transport, return -EFAULT)
-
-	if (list_empty(&fd_test_transport->links.suppliers)) {
-		fd_tt_err("There is an dependent device for this transport device.");
-		return -EINVAL;
-	}
-	return 0;
-}
-
-// Trim a sysfs input buffer coming from userspace
-// with might have unwanted characters
-//
-// @buf {valid prt} buffer to be trimmed
-// @size {number} size of data valid without 0-terminator
-//
-//RETURNS
-// count: size of valid data within the array
-size_t fd_tt_sysfs_trim_buffer(char *buf, size_t size)
-{
-	size_t count = size;
-	while (count > 0 && ((buf[count - 1] == '\n') || (buf[count - 1] == ' ')
-			|| (buf[count - 1] == '\t') || (buf[count - 1] == 0))) {
-		buf[count-- - 1] = 0;
-	}
-	return count;
-}
-
+/*------------- FULL DUPLEX INTERFACE HELPER FUNCTIONS -------------*/
 
 // Initializes the xfer data to the default empty state
 //
@@ -252,7 +217,8 @@ void fd_tt_xfer_init(struct full_duplex_xfer *xfer)
 	memset(xfer, 0, sizeof(struct full_duplex_xfer));
 }
 
-// Frees all owned by @xfer data
+// Frees all memory allocated within the xfer 
+// and defaults all its data 
 //
 // @xfer {valid ptr} transfer structure
 void fd_tt_xfer_free(struct full_duplex_xfer *xfer)
@@ -271,7 +237,7 @@ void fd_tt_xfer_free(struct full_duplex_xfer *xfer)
 	memset(xfer, 0, sizeof(struct full_duplex_xfer));
 }
 
-// Write the data received from user space into the xfer
+// Write the data received from userspace into the xfer
 // rx_data_buf and allocates the necessary space for it
 //
 // @xfer_device {valid ptr} xfer device
@@ -313,16 +279,16 @@ int fd_tt_update_wire_data(
 	}
 
 	// NOTE: the actual xfer will happen on-read (wire data show)
-	// 	to keep the US in sync. The total workflow goes:
-	// 	* US writes to wire
-	// 		* this data gets saved in current xfer
-	// 		* transport dev remembers that the wire data is provided
-	// 	* US reads from wire
-	// 		* transport dev gets read request
-	// 		* if no write was provided before - reject to read. Else:
-	// 		* the current xfer wire data is provided to US
-	// 		* transport dev confirms xfer_done(...) to ICCom
-	// 		* ICCom updates the current xfer with new data
+	//       to keep the userspace in sync. The total workflow goes:
+	//       * userspace writes to wire
+	//           * this data gets saved in current xfer
+	//               * transport dev remembers that the wire data is provided
+	//       * userspace reads from wire
+	//           * transport dev gets read request
+	//           * if no write was provided before - reject to read. Else:
+	//           * the current xfer wire data is provided to userspace
+	//           * transport dev confirms xfer_done(...) to ICCom
+	//           * ICCom updates the current xfer with new data
 	xfer_device->got_us_data = true;
 
 	return 0;
@@ -332,11 +298,12 @@ int fd_tt_update_wire_data(
 // with memory allocation and pointers checks
 //
 // @src {valid ptr} source xfer
-// @src {valid ptr} destination xfer
+// @dst {valid ptr} destination xfer
 //
 // RETURNS:
 //      0: ok
-//     <0: errors
+//      -EINVAL: src or dst is null pointer
+//      -ENOMEM: no memory to allocate
 int fd_tt_deep_xfer_copy(
 		struct full_duplex_xfer *src,
 		struct full_duplex_xfer *dst)
@@ -402,7 +369,7 @@ int fd_tt_iterate_to_next_xfer_id(
 // @xfer {valid ptr} received xfer from iccom
 //
 // RETURNS:
-//      0: ok
+//     >0: no errors
 //     <0: errors
 int fd_tt_accept_data(
 		struct fd_test_transport_dev* xfer_device,
@@ -421,7 +388,8 @@ int fd_tt_accept_data(
 }
 
 // Function to trigger an exchange of data between
-// iccom and transport with validation of data
+// iccom and full duplex test transport with data
+// validation
 //
 // @xfer_device {valid ptr} xfer device
 __maybe_unused
@@ -440,7 +408,8 @@ static void fd_tt_trigger_data_exchange(
 				&start_immediately,
 				xfer_device->xfer.consumer_data);
 
-	// for a new xfer US must provide a new data, so dropping the flag
+	// NOTE: For a new xfer to happen userspace must
+	//       provide new data, so dropping the flag
 	xfer_device->got_us_data = false;
 
 	if (IS_ERR_OR_NULL(next_xfer)) {
@@ -476,7 +445,8 @@ static void fd_tt_trigger_data_exchange(
 //     <0: errors
 __maybe_unused
 int fd_tt_data_xchange(
-		void __kernel *device , struct __kernel full_duplex_xfer *xfer,
+		void __kernel *device,
+		struct __kernel full_duplex_xfer *xfer,
 		bool force_size_change)
 {
 	FD_TT_CHECK_PTR(device, return -EFAULT)
@@ -510,7 +480,8 @@ int fd_tt_data_xchange(
 //      <0: error happened
 __maybe_unused
 int fd_tt_default_data_update(
-		void __kernel *device, struct full_duplex_xfer *xfer,
+		void __kernel *device,
+		struct full_duplex_xfer *xfer,
 		bool force_size_change)
 {
 	FD_TT_CHECK_PTR(device, return -EFAULT)
@@ -651,23 +622,61 @@ int fd_tt_reset(
 
 /* ------------- FULL DUPLEX TEST TRANSPORT DEVICE ------------- */
 
+// Check whether the transport device has link
+// dependencies to an upper layer (iccom device)
+//
+// @fd_test_transport {valid ptr} transport device to be checked
+//
+// RETURNS:
+//      0: No dependent device
+//   != 0: There is a dependent device
+ssize_t fd_tt_check_link_dependency(struct device *fd_test_transport)
+{
+	FD_TT_CHECK_PTR(fd_test_transport, return -EFAULT)
+
+	if (list_empty(&fd_test_transport->links.suppliers)) {
+		fd_tt_err("There is an dependent device for this "
+				"transport device.");
+		return -EINVAL;
+	}
+	return 0;
+}
+
+// Trim a sysfs input buffer coming from userspace
+// wich might have unwanted characters
+//
+// @buf {valid prt} buffer to be trimmed
+// @size {number} size of data valid without 0-terminator
+//
+//RETURNS
+// count: size of valid data within the array
+size_t fd_tt_sysfs_trim_buffer(char *buf, size_t size)
+{
+	size_t count = size;
+	while (count > 0 && ((buf[count - 1] == '\n') || (buf[count - 1] == ' ')
+			|| (buf[count - 1] == '\t') || (buf[count - 1] == 0))) {
+		buf[count-- - 1] = 0;
+	}
+	return count;
+}
+
 // Parse the hex string into a byte array.
 //
 // String must be a null-terminated string of 2-digit numbers (hex digits):
 // Example:
-// 		11030AFFDDCD\0
+//           11030AFFDDCD\0
 // each 2-digit number will be converted to the byte value,
-// and the result will be written to the
+// and the result will be written to the buffer
 //
 // NOTE: if parsing failed somewhere in the middle, then result is still
-// 	an error (so either all is fine or all failed, not inbetween)
+//       an error (so either all is fine or all failed, not inbetween)
 //
 // @str {valid ptr} buffer, containing the input null-terminated string
 // @str_len {number} length of string given by @str (in bytes)
-// 	**NOT** including the 0-terminator
+//                   **NOT** including the 0-terminator
 //
-// 	NOTE: if the @str_len is 0, then no parsing is done at all
-// 		function just returns.
+// NOTE: if the @str_len is 0, then no parsing is done at all
+//       function just returns.
 //
 // @bytearray__out {array} array to copy the data to
 // @out_size {>=0} size of the @bytearray__out in bytes
@@ -676,12 +685,9 @@ int fd_tt_reset(
 //      >=0: the size of the data written to @bytearray__out
 //      <0: negated error code
 ssize_t fd_tt_convert_hex_str_to_byte_array(
-		const char *str, const size_t str_len
-		, uint8_t *bytearray__out, size_t out_size)
+		const char *str, const size_t str_len,
+		uint8_t *bytearray__out, size_t out_size)
 {
-	// number of characters in the input string per one byte parsed
-	#define CHARS_PER_BYTE  2
-
 	// to be "intelligent" we go for this check first
 	if (str_len == 0) {
 		return 0;
@@ -700,27 +706,27 @@ ssize_t fd_tt_convert_hex_str_to_byte_array(
 		fd_tt_err("bad output array ptr.");
 		return -EINVAL;
 	}
-	if (str_len % CHARS_PER_BYTE != 0) {
+	if (str_len % FD_TT_CHARS_PER_BYTE != 0) {
 		fd_tt_err("string"
 			" must contain %d-multiple number of hex digits"
 			" + 0-terminator only. String provided (in -- quotes):"
 			" --%s--"
-			, CHARS_PER_BYTE, str);
+			, FD_TT_CHARS_PER_BYTE, str);
 		return -EINVAL;
 	}
-	if (out_size < str_len / CHARS_PER_BYTE) {
+	if (out_size < str_len / FD_TT_CHARS_PER_BYTE) {
 		fd_tt_err("receiver array"
 			" is smaller (%zu) than needed (%zu)."
-			, out_size, str_len / CHARS_PER_BYTE);
+			, out_size, str_len / FD_TT_CHARS_PER_BYTE);
 		return -EINVAL;
 	}
 
-	char tmp[CHARS_PER_BYTE + 1];
-	tmp[CHARS_PER_BYTE] = 0;
+	char tmp[FD_TT_CHARS_PER_BYTE + 1];
+	tmp[FD_TT_CHARS_PER_BYTE] = 0;
 
 	int w_idx = 0;
-	for (int i = 0; i <= str_len - CHARS_PER_BYTE; i += CHARS_PER_BYTE) {
-		memcpy(tmp, str + i, CHARS_PER_BYTE);
+	for (int i = 0; i <= str_len - FD_TT_CHARS_PER_BYTE; i += FD_TT_CHARS_PER_BYTE) {
+		memcpy(tmp, str + i, FD_TT_CHARS_PER_BYTE);
 
 		unsigned int val;
 		int res = kstrtouint(tmp, 16, &val);
@@ -736,8 +742,6 @@ ssize_t fd_tt_convert_hex_str_to_byte_array(
 		*(bytearray__out + w_idx++) = (uint8_t)val;
 	}
 
-	#undef CHARS_PER_BYTE
-
 	return w_idx;
 }
 
@@ -746,9 +750,13 @@ ssize_t fd_tt_convert_hex_str_to_byte_array(
 // and write the data in a new output table
 //
 // @buf__out {valid ptr} buffer to copy the data to
-// @buffer_size {number} size of buffer data
+// @buf_size {number} size of buffer data
 // @data_iccom_to_transport {array} array holding the data to be copied
 // @data_iccom_to_transport_size {number} size of array
+//
+// RETURNS:
+//      >=0: the size of the data written to @buf__out
+//      <0: negated error code
 ssize_t fd_tt_iccom_convert_byte_array_to_hex_str(
 		char *buf__out, size_t buf_size,
 		const uint8_t *data_iccom_to_transport,
@@ -756,8 +764,9 @@ ssize_t fd_tt_iccom_convert_byte_array_to_hex_str(
 {
 	ssize_t length = 0;
 
-	/* Each byte shall be transformed into 2 hexadecimal characters */
-	if (data_iccom_to_transport_size * 2 > buf_size) {
+	// NOTE: Each byte shall be transformed into hexadecimal characters
+	//       with the FD_TT_CHARS_PER_BYTE elements.
+	if (data_iccom_to_transport_size * FD_TT_CHARS_PER_BYTE > buf_size) {
 		fd_tt_err("Sysfs iccom to transport data is bigger than the buffer");
 		return -EINVAL;
 	}
@@ -766,35 +775,53 @@ ssize_t fd_tt_iccom_convert_byte_array_to_hex_str(
 	{
 		length += scnprintf(buf__out + length,
 						PAGE_SIZE - length,
-						"%02x", data_iccom_to_transport[i]);
+						"%0" __stringify(FD_TT_CHARS_PER_BYTE) "x",
+						data_iccom_to_transport[i]);
 	}
 	return length;
 }
 
-// Transport device R (show) attribute for checking if
-// what data has been transmitted from ICCom to Transport
+// The sysfs transport_RW_show function get's triggered
+// whenever from userspace one wants to read the sysfs
+// file transport_RW.
+// It shall return the data sent from iccom to transport
+// (that should be transmitted). Also it shall trigger a
+// the xfer exchange between iccom and transport.
 //
 // @dev {valid ptr} Transport device
 // @attr {valid ptr} device attribute properties
-// @buf {valid ptr} buffer to write output to user space
+// @buf {valid ptr} buffer to write output to userspace
+//
+//NOTE: To exchange data between transport and iccom
+//      one needs first to write to the transport via
+//      userspace trough transport_RW_store. Only then
+//      one can read the transport data and after that
+//      a new exchange shall happen
 //
 // RETURNS:
-//      0: No data
-//      > 0: size of data to be showed in user space
+//        0: No data
+//      > 0: size of data to be showed in userspace
+//  -EPROTO: No data has been written via userspace
+//           before trying to read
+//  -EINVAL: Converstion from byte to hex failed
+//  -EFAULT: Devices are null
+//  -ENODEV: Full duplex device does not exist
 static ssize_t transport_RW_show(
 		struct device *dev, struct device_attribute *attr, char *buf)
 {
-	FD_TT_CHECK_PTR(dev, return -EFAULT)
 	FD_TT_GET_FULL_DUPLEX_DEVICE(dev);
 	FD_TT_CHECK_FULL_DUPLEX_DEVICE("", return -ENODEV);
 	FD_TT_CHECK_XFER_DEVICE("", return -EFAULT);
 	FD_TT_FULL_DUPLEX_DEVICE_TO_XFER_DEVICE();
 
 	if (!xfer_device->got_us_data) {
-		fd_tt_err("to read something you need to write something first =)");
+		fd_tt_err("to read something you need to "
+				" write something first =)");
 		return -EPROTO;
 	}
 
+	// NOTE: We return the data available in the transport that got
+	//       written by iccom
 	ssize_t length = fd_tt_iccom_convert_byte_array_to_hex_str(
 				buf, PAGE_SIZE, (uint8_t*)xfer_device->xfer.data_tx,
 				xfer_device->xfer.size_bytes);
@@ -806,31 +833,37 @@ static ssize_t transport_RW_show(
 				xfer_device->xfer.size_bytes, true);
 		return -EINVAL;
 	}
-	
 
-	// Do the actual xfer here
+	// Perform the next xfer exchange
 	fd_tt_trigger_data_exchange(xfer_device);
 
 	return length;
 }
 
-// Transport device W (store) attribute for writing
-// data from userspace to the transport
+// The sysfs transport_RW_store function get's triggered
+// whenever from userspace one wants to write the sysfs
+// file transport_RW_store.
+// It shall write the data that shall be sent from transport
+// to the iccom in the next xfer exchange (which happen when
+// transport_RW sysfs file get's read).
 //
 // @dev {valid ptr} Transport device
 // @attr {valid ptr} device attribute properties
-// @buf {valid ptr} buffer with the data from user space
+// @buf {valid ptr} buffer with the data from userspace
 // @count {number} the @buf string length not-including the  0-terminator
-// 	which is automatically appended by sysfs subsystem
+//                 which is automatically appended by sysfs subsystem
 //
 // RETURNS:
 //  count: ok
-//    < 0: errors
+//  -EINVAL: buffer size is wrong, 0-terminator missing or xfer size less
+//           or equal to zero
+//  -EFAULT: Devices are null
+//  -ENODEV: Full duplex device does not exist
+//  -ENOMEM: No memory to allocate
 static ssize_t transport_RW_store(
 		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
-	FD_TT_CHECK_PTR(dev, return -EFAULT)
 	FD_TT_GET_FULL_DUPLEX_DEVICE(dev);
 	FD_TT_CHECK_FULL_DUPLEX_DEVICE("", return -ENODEV);
 	FD_TT_CHECK_XFER_DEVICE("", return -EFAULT);
@@ -842,7 +875,7 @@ static ssize_t transport_RW_store(
 	size_t hex_buffer_size = count + 1;
 	// Wire data will always be half the size of the received buffer
 	// from userspace 
-	size_t wire_data_size = count / 2;
+	size_t wire_data_size = count / FD_TT_CHARS_PER_BYTE;
 	ssize_t ret;
 
 	if (count >= PAGE_SIZE) {
@@ -903,18 +936,21 @@ hex_buffer_clean_up:
 
 static DEVICE_ATTR_RW(transport_RW);
 
-// Show RW (store) attribute, for creating
-// or destroying the R and W files on
-// transport
+// The sysfs transport_ctl_store function get's triggered
+// whenever from userspace one wants to write the sysfs
+// file transport_ctl.
+// It allows to create or destroy the transport_RW sysfs
+// file for a given transport.
 //
 // @dev {valid ptr} iccom device
-// @attr {valid ptr} class attribute properties
-// @buf {valid ptr} buffer to read input from user space
-// @count {number} size of buffer from user space
+// @attr {valid ptr} device attribute properties
+// @buf {valid ptr} buffer to read input from userspace
+// @count {number} the @buf string length not-including the  0-terminator
+//                 which is automatically appended by sysfs subsystem
 //
 // RETURNS:
-//  count: ok
-//    < 0: errors
+//  count (1): ok
+//         <0: negated error code
 static ssize_t transport_ctl_store(
 		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
@@ -956,10 +992,15 @@ wrong_usage:
 
 static DEVICE_ATTR_WO(transport_ctl);
 
-// List of all Transport device attributes
+// List containing default attributes that a
+// full duplex test transport device can have.
 //
-// @dev_attr_transport_ctl the Transport file to create
-//                      or delete the R and W files
+// NOTE: sysfs file transport_RW is not registered in
+//       this list as it can be manually created/destroyed
+//       using the sysfs file transport_ctl
+//
+// @dev_attr_transport_ctl the sysfs file to create
+//                      or destroy the RW file
 static struct attribute *fd_test_transport_dev_attrs[] = {
 	&dev_attr_transport_ctl.attr,
 	NULL,
@@ -967,23 +1008,27 @@ static struct attribute *fd_test_transport_dev_attrs[] = {
 
 ATTRIBUTE_GROUPS(fd_test_transport_dev);
 
-// Sysfs file to create Full Duplex Test Transport
-// devices via user space
+// The sysfs create_transport_store function get's triggered
+// whenever from userspace one wants to write the sysfs
+// file create_transport.
+// It shall create full duplex test transport devices with
+// an unique id.
 //
 // @class {valid ptr} transport class
-// @attr {valid ptr} device attribute properties
-// @buf {valid ptr} buffer to read input from user space
-// @count {number} size of buffer from user space
+// @attr {valid ptr} class attribute properties
+// @buf {valid ptr} buffer to read input from userspace
+// @count {number} the @buf string length not-including the  0-terminator
+//                 which is automatically appended by sysfs subsystem
 //
 // RETURNS:
 //  count: ok
-//    < 0: errors
+//     <0: negated error code
 static ssize_t create_transport_store(
 		struct class *class, struct class_attribute *attr,
 		const char *buf, size_t count)
 {
-	// Allocate one unused ID
-	int device_id = ida_alloc(&fd_test_transport_dev_id,GFP_KERNEL);
+	// Allocate new unused ID
+	int device_id = ida_alloc(&fd_tt_dev_id,GFP_KERNEL);
 
 	if (device_id < 0) {
 		fd_tt_err("Could not allocate a new unused ID");
@@ -1003,7 +1048,7 @@ static ssize_t create_transport_store(
 	if (IS_ERR_OR_NULL(new_pdev)) {
 		fd_tt_err("Could not register the device fd_test_transport.%d",
 								device_id);
-		ida_free(&fd_test_transport_dev_id, device_id);
+		ida_free(&fd_tt_dev_id, device_id);
 		return -EFAULT;
 	}
 
@@ -1012,24 +1057,31 @@ static ssize_t create_transport_store(
 
 static CLASS_ATTR_WO(create_transport);
 
-// Sysfs class method for deleting fd_test_transport instances
-// trough the usage of sysfs internal mechanisms
+// The sysfs delete_transport_store function get's triggered
+// whenever from userspace one wants to write the sysfs
+// file delete_transport.
+// It shall delete the full duplex test transport device
+// wich matchs the provided id.
 //
-// @class {valid ptr} iccom class
-// @attr {valid ptr} device attribute properties
-// @buf {valid ptr} buffer to read input from user space
-// @count {number} size of buffer from user space
+// @class {valid ptr} transport class
+// @attr {valid ptr} class attribute properties
+// @buf {valid ptr} buffer to read input from userspace
+// @count {number} the @buf string length not-including the  0-terminator
+//                 which is automatically appended by sysfs subsystem
 //
 // NOTE: Whenever there is an iccom device using
-//       the fd_test_transport via a link dependency
+//       the fd_test_transport with a link dependency
 //       we do not allow the userspace to destroy the
-//       device in any condition. The userspace creates
-//       fd_test_transport devices manually and he is
-//       responsible to destroy them in the end.
+//       device. In order to delete properly the transport
+//       one needs to destroy first the iccom device and only
+//       then one can destroy the transport. Also the userspace
+//       is responsible while testing via sysfs for creating 
+//       manually the fd_test_transport devices as well as to 
+//       destroy them in the end.
 //
 // RETURNS:
 //  count: ok
-//    < 0: errors
+//     <0: negated error code
 static ssize_t delete_transport_store(
 		struct class *class, struct class_attribute *attr,
 		const char *buf, size_t count)
@@ -1085,7 +1137,7 @@ static ssize_t delete_transport_store(
 
 static CLASS_ATTR_WO(delete_transport);
 
-// List of all Transport class attributes
+// List containing all transport class attributes
 //
 // @class_attr_create_transport sysfs file for creating
 //                              fd_test_transport devices
@@ -1099,7 +1151,7 @@ static struct attribute *fd_tt_class_attrs[] = {
 
 ATTRIBUTE_GROUPS(fd_tt_class);
 
-// The Transport class definition
+// The full duplex test transport class definition
 //
 // @name class name
 // @owner the module owner
@@ -1110,37 +1162,19 @@ static struct class fd_tt_class = {
 	.class_groups = fd_tt_class_groups
 };
 
-// Registers the Transport class for sysfs
+// Probing function for full duplex test transport
+// devices wich get's called whenever a new device
+// is found. It allocates the device structure needed
+// in memory and sets the full duplex interface and initializes
+// the full duplex test transport properties.
+//
+// @pdev {valid ptr} transport platform device
 //
 // RETURNS:
-//      0: ok
-//      !0: nok
-int fd_tt_sysfs_transport_class_register(void)
-{
-	return class_register(&fd_tt_class);
-};
-
-// Unregisters the ICCom class for sysfs
-void fd_tt_sysfs_transport_class_unregister(void)
-{
-	class_unregister(&fd_tt_class);
-};
-
-// Transport device probe which initializes the device
-// and allocates the full_duplex_device
-//
-// @pdev {valid ptr} transport device
-//
-// RETURNS:
-//      0: ok
-//     <0: errors
+//      0: Sucessfully probed the device
+//     <0: negated error code
 static int fd_tt_probe(struct platform_device *pdev)
 {
-	if (IS_ERR_OR_NULL(pdev)) {
-		fd_tt_err("Transport test device pdev is null.");
-		return -EFAULT;
-	}
-
 	struct full_duplex_device * full_duplex_dev = 
 		(struct full_duplex_device *) 
 			kmalloc(sizeof(struct full_duplex_device), GFP_KERNEL);
@@ -1169,32 +1203,20 @@ static int fd_tt_probe(struct platform_device *pdev)
 	return 0;
 };
 
-// Transport device remove which deinitialize the device
-// and frees the full_duplex_device
+// Remove function for full duplex test transport
+// devices wich get's called whenever the device will
+// be destroyed. It frees the the device structure
+// allocated previously in the probe function and
+// clears the full duplex interface.
 //
-// @pdev {valid ptr} transport device
-//
-// TODO: Introduce proper device linking to guarantee proper
-//       removal. Expectation for now is that nobody is using
-//       the device when this is called.
+// @pdev {valid ptr} transport platform device
 //
 // RETURNS:
-//      0: ok
-//     <0: errors
+//      0: Sucessfully removed the device
+//     <0: negated error code
 static int fd_tt_remove(struct platform_device *pdev)
 {
-	if (IS_ERR_OR_NULL(pdev)) {
-		fd_tt_warning("Transport test device pdev is null.");
-		return -EFAULT;
-	}
-
-	fd_tt_info(FD_TT_LOG_INFO_DBG_LEVEL,
-			"Removing a Full Duplex Test Transport "
-			"device with id: %d", pdev->id);
-
-	struct full_duplex_device *full_duplex_dev = 
-			(struct full_duplex_device *) dev_get_drvdata(&pdev->dev);
-
+	FD_TT_GET_FULL_DUPLEX_DEVICE(&pdev->dev)
 	FD_TT_CHECK_FULL_DUPLEX_DEVICE("full duplex device is null"
 					" when trying to remove the"
 					" platform device."
@@ -1220,7 +1242,9 @@ static int fd_tt_remove(struct platform_device *pdev)
 	return 0;
 }
 
-// The Transport driver compatible definition
+// The full duplex test transport driver
+// compatible definition for matching the
+// driver to devices available
 //
 // @compatible name of compatible driver
 struct of_device_id fd_tt_driver_id[] = {
@@ -1229,10 +1253,12 @@ struct of_device_id fd_tt_driver_id[] = {
 	}
 };
 
-// The Transport driver definition
+// The full duplex test transport driver definition
 //
-// @probe probe device function
-// @remove remove device function
+// @probe probe device function called when new device is found
+//        that matches the compatible string
+// @remove remove device function called when the device is to
+//         to be destroyed
 // @driver structure driver definition
 // @driver::owner the module owner
 // @driver::name name of driver
@@ -1254,35 +1280,43 @@ struct platform_driver fd_tt_driver = {
 // and the sysfs class
 //
 // RETURNS:
-//      0: ok
-//     !0: nok
+//      0: Sucessfully loaded the module
+//     <0: negated error code
 static int __init fd_tt_module_init(void)
 {
-	ida_init(&fd_test_transport_dev_id);
+	ida_init(&fd_tt_dev_id);
 
 	int ret = platform_driver_register(&fd_tt_driver);
-	
 	if (ret != 0) {
-		fd_tt_err("Transport Driver Register failed : %d", ret);
+		fd_tt_err("Full duplex test transport "
+				"driver register failed: %d", ret);
 		return ret;
 	}
 
-	fd_tt_sysfs_transport_class_register();
+	ret = class_register(&fd_tt_class);
+	if (ret != 0) {
+		fd_tt_err("Full duplex test transport "
+				"class register failed: %d", ret);
+		ida_destroy(&fd_tt_dev_id);
+		platform_driver_unregister(&fd_tt_driver);
+		return ret;
+	}
+	fd_tt_info(FD_TT_LOG_INFO_KEY_LEVEL, "Sucessfully loaded full duplex"
+						"test transport module");
+
 	return 0;
 }
 
 // Module exit method to unregister
-// the full duplex test transport driver
-// and the sysfs class and destroy the ida
-//
-// RETURNS:
-//      0: ok
-//     !0: nok
+// the full duplex test transport driver,
+// the sysfs class and destroy the ida
 static void __exit fd_tt_module_exit(void)
 {
-	fd_tt_sysfs_transport_class_unregister();
+	class_unregister(&fd_tt_class);
 	platform_driver_unregister(&fd_tt_driver);
-	ida_destroy(&fd_test_transport_dev_id);
+	ida_destroy(&fd_tt_dev_id);
+	fd_tt_info(FD_TT_LOG_INFO_KEY_LEVEL, "Sucessfully unloaded full duplex"
+						"test transport module");
 }
 
 module_init(fd_tt_module_init);

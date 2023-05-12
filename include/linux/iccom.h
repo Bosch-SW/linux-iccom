@@ -37,25 +37,27 @@
 // transport layer failed
 #define ICCOM_ERROR_TRANSPORT 2
 
+
 // size of data xfer in bytes
 #define ICCOM_DATA_XFER_SIZE_BYTES 64
 // size of data acknoledgement xfer in bytes
 #define ICCOM_ACK_XFER_SIZE_BYTES 1
 
-// defines the sysfs create channel character
-// to be used to create channels
+// defines the character for creating
+// sysfs channels via user space
 #define ICCOM_SYSFS_CREATE_CHANNEL 'c'
-// defines the sysfs destroy channel character
-// to be used to destroy channels
+// defines the character for destroying
+// sysfs channels via user space
 #define ICCOM_SYSFS_DELETE_CHANNEL 'd'
-// defines the sysfs set channel character
-// to be used to set the channel to be read or written
+// defines the character for selecting
+// the sysfs channel that may be read/written
+// via sysfs interfaces channels_show/channels_store
 #define ICCOM_SYSFS_SET_CHANNEL 's'
 
-// maximum size for sysfs channel store command
-#define ICCOM_TEST_SYSFS_CH_CMD_MAX_CHAR			25U
-// number of maximum messages from iccom to
-// the upper layer that the list can store
+
+// maximum number of sniffed messages that can be
+// stored per sysfs channel. Sniffed messages have
+// the following direction iccom --> iccom sockets (upper layer)
 #define ICCOM_SYSFS_MAX_MSG_ALLOWED_PER_CHANNEL			50U
 
 // The message ready for customer layer callback type.

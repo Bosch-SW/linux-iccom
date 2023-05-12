@@ -196,14 +196,15 @@ def iccom_version(err_expectation):
 #
 # @iccom_dev {string} id of the iccom device
 # @channel {number} the destination channel id
+# @message {string} message to send
 # @err_expectation {number} the errno which is expected
 #                           to be caught. Example: None, errno.EIO, ...
-def iccom_write(iccom_dev, channel, message, err_expectation):
+def iccom_send(iccom_dev, channel, message, err_expectation):
     # Set sysfs channel to work with
     set_iccom_sysfs_channel(iccom_dev, channel, None)
     # Write to the working sysfs channel
     file = "/sys/devices/platform/%s/channels_RW" % (iccom_dev)
-    print("iccom_write: " + str(channel))
+    print("iccom_send: " + str(channel))
     command = message
     write_sysfs_file(file, command, err_expectation)
 
@@ -332,7 +333,7 @@ def check_ch_data(iccom_device, channel, expected_ch_data, expected_error):
                                "    %s (received)\n"
                                % (expected_ch_data, output))
 
-# Create the RW sysfs files for a full duxplex test device and propagate
+# Create the RW sysfs files for a full duplex test device and propagate
 # the error expectations
 #
 # @transport_dev {string} full duplex test device name
@@ -343,7 +344,7 @@ def create_transport_device_RW_files(transport_dev, err_expectation):
     command = "c"
     write_sysfs_file(file, command, err_expectation)
 
-# Deletes the RW sysfs files for a full duxplex test device and propagate
+# Deletes the RW sysfs files for a full duplex test device and propagate
 # the error expectations
 #
 # @transport_dev {string} full duplex test device name
@@ -560,7 +561,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(
         create_transport_device_RW_files(transport_dev, None)
 
         # Send a message from ICCOM to Full Duplex Test Transport via channel 1
-        iccom_write(iccom_device, 1, "Who are you?", None)
+        iccom_send(iccom_device, 1, "Who are you?", None)
 
         # Default xfer
         check_wire_xfer(transport_dev, iccom_package(1, bytearray())
@@ -626,7 +627,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
         create_transport_device_RW_files(transport_dev, None)
 
         # Send a message from ICCOM to Full Duplex Test Transport via channel 1
-        iccom_write(iccom_device, 1, "Who are you?", None)
+        iccom_send(iccom_device, 1, "Who are you?", None)
 
         # Do (Default xfer) Data Exchange + ACK
         check_wire_xfer(transport_dev, iccom_package(1, bytearray())
@@ -666,7 +667,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
         create_transport_device_RW_files(transport_dev, None)
 
         # Send a message from ICCOM to Full Duplex Test Transport via channel 1
-        iccom_write(iccom_device, 1000, "Is there anybody there?", None)
+        iccom_send(iccom_device, 1000, "Is there anybody there?", None)
 
         # Do (Default xfer) Data Exchange + NACK
         check_wire_xfer(transport_dev, iccom_package(1, bytearray())
@@ -775,13 +776,13 @@ def iccom_stress_data_communication_with_different_channels(
 
         create_transport_device_RW_files(transport_dev, None)
 
-        for i in range(number_of_msgs):
+        for i in range(1, number_of_msgs+1):
             
             ch = random.randint(0,number_of_channels-1)
             # Increment the size of question and answer
             # which get's generated from 1 to 50 bytes of
             # message
-            gen_char_size = i+1
+            gen_char_size = i
             print("Test channel: " + str(ch))
 
             question_str = ''.join(random.choices(string.ascii_uppercase +
@@ -793,7 +794,7 @@ def iccom_stress_data_communication_with_different_channels(
             answer_b = answer_str.encode('utf-8')
 
             # Send a message from ICCOM to Full Duplex Test Transport via the channel
-            iccom_write(iccom_device, ch, question_str, None)
+            iccom_send(iccom_device, ch, question_str, None)
 
             # Default Transfer
             check_wire_xfer(transport_dev, iccom_package(sequence_number, bytearray())
