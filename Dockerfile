@@ -8,13 +8,6 @@ FROM bosch-linux-full-duplex-interface:latest AS iccom
 ARG kernel_source_dir_x86=/repos/linux_x86/
 ARG kernel_source_dir_arm=/repos/linux_arm/
 
-RUN cd /repos/linux && ./scripts/config --set-val CONFIG_NET y
-RUN cd /repos/linux && make -j16
-ARG QEMU_KERNEL_IMAGE_PATH="/builds/linux/linuz.bzImage"
-RUN ls -la /builds/linux/
-RUN cp /repos/linux/arch/x86/boot/bzImage    \
-          ${QEMU_KERNEL_IMAGE_PATH}
-
 ENV repo_path=/repos/linux-iccom
 RUN rm -rf ${repo_path} && mkdir -p ${repo_path}
 
@@ -98,29 +91,52 @@ FROM iccom AS iccom-test
 # Taking our test module and building it
 #
 
-ARG TEST_NAME="iccom_test"
+ARG ICCOM_TEST_NAME="iccom_test"
+ARG ICCOM_SK_TEST_NAME="iccom_sk_test"
 
 # x86
+
+# Add Python Test
+COPY test/iccom_common.py /builds/python-test/
+# Binarization and blobing of the test script into initramfs
+RUN python-to-initramfs-x86 /builds/python-test/iccom_common.py
 
 # Add Python Test
 COPY test/iccom_test.py /builds/python-test/
 # Binarization and blobing of the test script into initramfs
 RUN python-to-initramfs-x86 /builds/python-test/iccom_test.py
 
+# Add Python Test
+COPY test/iccom_sk_test.py /builds/python-test/
+# Binarization and blobing of the test script into initramfs
+RUN python-to-initramfs-x86 /builds/python-test/iccom_sk_test.py
+
+
+# Add Python Test
+COPY test/iccom_main.py /builds/python-test/
+# Binarization and blobing of the test script into initramfs
+RUN python-to-initramfs-x86 /builds/python-test/iccom_main.py
+
+
 RUN run-qemu-tests-x86
 
 # Check the expected results
 
-RUN grep "${TEST_NAME}_0.python: PASS" /qemu_run_x86.log
-RUN grep "${TEST_NAME}_1.python: PASS" /qemu_run_x86.log
-RUN grep "${TEST_NAME}_2.python: PASS" /qemu_run_x86.log
-RUN grep "${TEST_NAME}_3.python: PASS" /qemu_run_x86.log
-RUN grep "${TEST_NAME}_4.python: PASS" /qemu_run_x86.log
-RUN grep "${TEST_NAME}_5.python: PASS" /qemu_run_x86.log
-RUN grep "${TEST_NAME}_6.python: PASS" /qemu_run_x86.log
-RUN grep "${TEST_NAME}_final_1.python: PASS" /qemu_run_x86.log
-RUN grep "${TEST_NAME}_final_2.python: PASS" /qemu_run_x86.log
-RUN grep "iccom_sk_test_1: PASS" /qemu_run_x86.log
+# ICCOM
+RUN grep "${ICCOM_TEST_NAME}_0.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_TEST_NAME}_1.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_TEST_NAME}_2.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_TEST_NAME}_3.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_TEST_NAME}_4.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_TEST_NAME}_5.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_TEST_NAME}_6.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_TEST_NAME}_final_1.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_TEST_NAME}_final_2.python: PASS" /qemu_run_x86.log
+
+# ICCOM SK
+RUN grep "${ICCOM_SK_TEST_NAME}_protocol_family_22_1.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_SK_TEST_NAME}_protocol_family_23_1.python: PASS" /qemu_run_x86.log
+RUN grep "${ICCOM_SK_TEST_NAME}_protocol_family_24_1.python: PASS" /qemu_run_x86.log
 
 # ARM
 
@@ -131,12 +147,15 @@ RUN dtc -I dts -O dtb /builds/linux_arm/device_tree/versatile-pb_iccom.dts > /bu
 
 # Add shell Test
 RUN mkdir -p /builds/shell-tests
+COPY test/iccom_main.sh /builds/shell-tests
+RUN shell-to-initramfs-arm /builds/shell-tests/iccom_main.sh
+
+# Add shell Test
+RUN mkdir -p /builds/shell-tests
 COPY test/iccom_test.sh /builds/shell-tests
 RUN shell-to-initramfs-arm /builds/shell-tests/iccom_test.sh
 
 RUN run-qemu-tests-arm /builds/linux_arm/device_tree/versatile-pb_iccom.dtb
 
 # Check the expected results
-RUN grep "${TEST_NAME}_0.shell.tests: PASS" /qemu_run_arm.log
-
-RUN cat /qemu_run_arm.log
+RUN grep "${ICCOM_TEST_NAME}_0.shell.tests: PASS" /qemu_run_arm.log

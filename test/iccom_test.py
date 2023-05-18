@@ -6,89 +6,8 @@ import os
 import string
 import random
 
-# Executes a shell command
-#
-# @command {string} command to be executed
-def execute_shell_command(command):
-    subprocess.run(command, shell=True)
+import iccom_common as iccom_common
 
-# Read a sysfs file and handle expectations
-# within the function by raising errors when errors
-# are found or expectations are mismatched
-#
-# @file {string} file to read
-# @err_expectation {number} the errno which is expected
-#                           to be caught. Example: None, errno.EIO, ...
-#
-# Returns:
-# Empty String
-# String with data read
-#
-# Throws an exception if the received error doesn't match expected
-def read_sysfs_file(file, err_expectation):
-
-    try:
-        with open(file, 'r') as file:
-            return str(file.read())
-    except OSError as e:
-        if err_expectation == None:
-            raise RuntimeError("Sysfs read file unexpected error \n"
-                               "    (file) %s \n"
-                               "    (error) %s \n"
-                               % (file, e.errno))
-        else:
-            if (e.errno != err_expectation):
-                raise RuntimeError("Sysfs read file expectation mismatch\n"
-                     "    (file) %s \n"
-                     "    (actual) %s \n"
-                     "    (expectation) %s \n"
-                     % (file, e.errno, err_expectation))
-    return ""
-
-# Write a sysfs file and handle expectations
-# within the function by raising errors when errors
-# are found or expectations are mismatched
-#
-# @file {string} file to write
-# @content_to_write {string} content to write
-# @err_expectation {number} the errno which is expected
-#                           to be caught. Example: None, errno.EIO, ...
-#
-# Throws an exception if the received error doesn't match expected
-def write_sysfs_file(file, content_to_write, err_expectation):
-    try:
-        with open(file, 'w') as file:
-            file.write(content_to_write)
-    except OSError as e:
-        if err_expectation == None:
-            raise RuntimeError("Sysfs write file unexpected error \n"
-                               "    (file) %s \n"
-                               "    (error) %s \n"
-                               % (file, e.errno))
-        else:
-            if (e.errno != err_expectation):
-                raise RuntimeError("Sysfs write file expectation mismatch\n"
-                     "    (file) %s \n"
-                     "    (actual) %s \n"
-                     "    (expectation) %s \n"
-                     % (file, e.errno, err_expectation))
-
-# Checks whether a sysfs file exists or not and handle expectations
-# within the function by raising errors when errors
-# are found or expectations are mismatched
-#
-# @file {string} file to check for presence
-# @err_expectation {number} the errno which is expected
-#                           to be caught. Example: None, errno.EIO, ...
-# Throws an exception if the received error doesn't match expected
-def check_sysfs_file_presence_expectation(file, expectation):
-    if os.path.exists(file) != expectation:
-        raise RuntimeError("sysfs file presence expectation mismatch\n"
-                               "    (file) %s \n"
-                               "    (actual) %s \n"
-                               "    (expectation) %s \n"
-                               % (file, not expectation, expectation))
-    
 # Create an iccom devices and propagate
 # the error expectations
 #
@@ -97,7 +16,7 @@ def check_sysfs_file_presence_expectation(file, expectation):
 def create_iccom_device(err_expectation):
     file = "/sys/class/iccom/create_iccom"
     command = " "
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Delete an iccom devices and propagate
 # the error expectations
@@ -108,7 +27,7 @@ def create_iccom_device(err_expectation):
 def delete_iccom_device(iccom_dev, err_expectation):
     file = "/sys/class/iccom/delete_iccom"
     command = "%s" % (iccom_dev)
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Create an full duplex test transport device and propagate
 # the error expectations
@@ -118,7 +37,7 @@ def delete_iccom_device(iccom_dev, err_expectation):
 def create_fd_test_transport_device(err_expectation):
     file = "/sys/class/fd_test_transport/create_transport"
     command = " "
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Delete an full duplex test transport device and propagate
 # the error expectations
@@ -129,7 +48,7 @@ def create_fd_test_transport_device(err_expectation):
 def delete_fd_test_transport_device(transport_dev, err_expectation):
     file = "/sys/class/fd_test_transport/delete_transport"
     command = "%s" % (transport_dev)
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Link an iccom to a full duplex test transport device
 # and propagate the error expectations
@@ -141,7 +60,7 @@ def delete_fd_test_transport_device(transport_dev, err_expectation):
 def link_fd_test_transport_device_to_iccom_device(transport_dev, iccom_dev, err_expectation):
     file = "/sys/devices/platform/%s/transport" % (iccom_dev)
     command = transport_dev
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Create an iccom sysfs channel and propagate
 # the error expectations
@@ -153,7 +72,7 @@ def link_fd_test_transport_device_to_iccom_device(transport_dev, iccom_dev, err_
 def create_iccom_sysfs_channel(iccom_dev, channel, err_expectation):
     file = "/sys/devices/platform/%s/channels_ctl" % (iccom_dev)
     command = "c%d" % (channel)
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Delete an iccom sysfs channel and propagate
 # the error expectations
@@ -165,7 +84,7 @@ def create_iccom_sysfs_channel(iccom_dev, channel, err_expectation):
 def delete_iccom_sysfs_channel(iccom_dev, channel, err_expectation):
     file = "/sys/devices/platform/%s/channels_ctl" % (iccom_dev)
     command = "d%d" % (channel)
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Set the iccom sysfs channel to read or write and propagate
 # the error expectations
@@ -177,7 +96,7 @@ def delete_iccom_sysfs_channel(iccom_dev, channel, err_expectation):
 def set_iccom_sysfs_channel(iccom_dev, channel, err_expectation):
     file = "/sys/devices/platform/%s/channels_ctl" % (iccom_dev)
     command = "s%d" % (channel)
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Retrieves the iccom git revision and propagate
 # the error expectations
@@ -189,7 +108,7 @@ def set_iccom_sysfs_channel(iccom_dev, channel, err_expectation):
 # String with data read
 def iccom_version(err_expectation):
     file = "/sys/class/iccom/version"
-    output = read_sysfs_file(file, err_expectation)
+    output = iccom_common.read_sysfs_file(file, err_expectation)
     return output
 
 # Writes message to the given iccom sysfs channel
@@ -206,7 +125,7 @@ def iccom_send(iccom_dev, channel, message, err_expectation):
     file = "/sys/devices/platform/%s/channels_RW" % (iccom_dev)
     print("iccom_send: " + str(channel))
     command = message
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Reads message from the given iccom sysfs channel and propagate
 # the error expectations
@@ -224,7 +143,7 @@ def iccom_read(iccom_dev, channel, err_expectation):
     # Read from the working sysfs channel
     file = "/sys/devices/platform/%s/channels_RW" % (iccom_dev)
     print("iccom_read: " + str(channel))
-    output = read_sysfs_file(file, err_expectation)
+    output = iccom_common.read_sysfs_file(file, err_expectation)
     return output
 
 # Write in the full duplext test transport device the wire
@@ -238,7 +157,7 @@ def write_to_wire(transport_dev, data, err_expectation):
     print("iccom_test: simulated wire data: %s" % (data.hex(),))
     file = "/sys/devices/platform/%s/transport_RW" % (transport_dev)
     command = data.hex()
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Reads the data that iccom sent to the wire and propagate
 # the error expectations
@@ -250,7 +169,7 @@ def write_to_wire(transport_dev, data, err_expectation):
 # RETURNS: the bytarray of wire data sent by ICCom to the wire
 def read_from_wire(transport_dev, err_expectation):
     file = "/sys/devices/platform/%s/transport_RW" % (transport_dev)
-    output = read_sysfs_file(file, err_expectation)
+    output = iccom_common.read_sysfs_file(file, err_expectation)
     result = bytearray.fromhex(output)
     print("iccom_test: received wire data: %s" % (result.hex(),))
     return result
@@ -342,7 +261,7 @@ def check_ch_data(iccom_device, channel, expected_ch_data, expected_error):
 def create_transport_device_RW_files(transport_dev, err_expectation):
     file = "/sys/devices/platform/%s/transport_ctl" % (transport_dev)
     command = "c"
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Deletes the RW sysfs files for a full duplex test device and propagate
 # the error expectations
@@ -353,7 +272,7 @@ def create_transport_device_RW_files(transport_dev, err_expectation):
 def delete_transport_device_RW_files(transport_dev, err_expectation):
     file = "/sys/devices/platform/%s/transport_ctl" % (transport_dev)
     command = "d"
-    write_sysfs_file(file, command, err_expectation)
+    iccom_common.write_sysfs_file(file, command, err_expectation)
 
 # Provides package on the basis of the package payload
 # NOTE: by package payload is meant
@@ -553,15 +472,15 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(
                      , "test_id": "iccom_test_1.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device"]
+        iccom_dev = params["iccom_dev"]
 
         ###### Test sequence ######
 
-        create_iccom_sysfs_channel(iccom_device, 1, None)
+        create_iccom_sysfs_channel(iccom_dev, 1, None)
         create_transport_device_RW_files(transport_dev, None)
 
         # Send a message from ICCOM to Full Duplex Test Transport via channel 1
-        iccom_send(iccom_device, 1, "Who are you?", None)
+        iccom_send(iccom_dev, 1, "Who are you?", None)
 
         # Default xfer
         check_wire_xfer(transport_dev, iccom_package(1, bytearray())
@@ -577,7 +496,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(
         check_wire_xfer_ack(transport_dev, None, None, "second ack frame")
 
         # Check channel data
-        check_ch_data(iccom_device, 1, "I am Luis", None)
+        check_ch_data(iccom_dev, 1, "I am Luis", None)
 
 def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
                 params, get_test_info=False):
@@ -588,11 +507,11 @@ def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
                      , "test_id": "iccom_test_2.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device"]
+        iccom_dev = params["iccom_dev"]
 
         ###### Test sequence ######
 
-        create_iccom_sysfs_channel(iccom_device, 1, None)
+        create_iccom_sysfs_channel(iccom_dev, 1, None)
         create_transport_device_RW_files(transport_dev, None)
 
         # Do (Default xfer) Data Exchange + ACK
@@ -609,7 +528,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
         check_wire_xfer_ack(transport_dev, None, None, "second ack frame")
 
         # Check that there is no channel data
-        check_ch_data(iccom_device, 1, "", errno.EIO)
+        check_ch_data(iccom_dev, 1, "", errno.EIO)
 
 def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_payload_size(
                 params, get_test_info=False):
@@ -619,15 +538,15 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
                      , "test_id": "iccom_test_3.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device"]
+        iccom_dev = params["iccom_dev"]
 
         ###### Test sequence ######
 
-        create_iccom_sysfs_channel(iccom_device, 1, None)
+        create_iccom_sysfs_channel(iccom_dev, 1, None)
         create_transport_device_RW_files(transport_dev, None)
 
         # Send a message from ICCOM to Full Duplex Test Transport via channel 1
-        iccom_send(iccom_device, 1, "Who are you?", None)
+        iccom_send(iccom_dev, 1, "Who are you?", None)
 
         # Do (Default xfer) Data Exchange + ACK
         check_wire_xfer(transport_dev, iccom_package(1, bytearray())
@@ -648,7 +567,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
                         , None , None, "expected nack on wire frame")
 
         # Check that there is no channel data
-        check_ch_data(iccom_device, 1, "", errno.EIO)
+        check_ch_data(iccom_dev, 1, "", errno.EIO)
 
 def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
                 params, get_test_info=False):
@@ -659,15 +578,15 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
                      , "test_id": "iccom_test_4.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device"]
+        iccom_dev = params["iccom_dev"]
 
         ###### Test sequence ######
 
-        create_iccom_sysfs_channel(iccom_device, 1000, None)
+        create_iccom_sysfs_channel(iccom_dev, 1000, None)
         create_transport_device_RW_files(transport_dev, None)
 
         # Send a message from ICCOM to Full Duplex Test Transport via channel 1
-        iccom_send(iccom_device, 1000, "Is there anybody there?", None)
+        iccom_send(iccom_dev, 1000, "Is there anybody there?", None)
 
         # Do (Default xfer) Data Exchange + NACK
         check_wire_xfer(transport_dev, iccom_package(1, bytearray())
@@ -694,7 +613,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
         check_wire_xfer_ack(transport_dev, None, None, "final ack")
 
         # Check that there is no channel data
-        check_ch_data(iccom_device, 1000, "", errno.EIO)
+        check_ch_data(iccom_dev, 1000, "", errno.EIO)
 
 def iccom_check_devices_deletion(
                 params, get_test_info=False):
@@ -710,17 +629,15 @@ def iccom_check_devices_deletion(
         ###### Test sequence ######
         
         for i in range(number_of_devices):
-             iccom_device = "/sys/devices/platform/%s" % (device_name + str(i))
+             iccom_dev = "/sys/devices/platform/%s" % (device_name + str(i))
 
              # Check that sysfs channel file exists
-             check_sysfs_file_presence_expectation(iccom_device , True)
+             iccom_common.check_sysfs_file_presence_expectation(iccom_dev , True)
 
              delete_iccom_device(device_name + str(i), None)
 
              # Check that sysfs channel file does not exists
-             check_sysfs_file_presence_expectation(iccom_device , False)
-
-        check_device_existance(device_name)
+             iccom_common.check_sysfs_file_presence_expectation(iccom_dev , False)
 
 def fd_test_transport_check_devices_deletion(
                 params, get_test_info=False):
@@ -736,24 +653,15 @@ def fd_test_transport_check_devices_deletion(
         ###### Test sequence ######
 
         for i in range(number_of_devices):
-             iccom_device = "/sys/devices/platform/%s" % (device_name + str(i))
+             iccom_dev = "/sys/devices/platform/%s" % (device_name + str(i))
 
              # Check that sysfs channel file exists
-             check_sysfs_file_presence_expectation(iccom_device , True)
+             iccom_common.check_sysfs_file_presence_expectation(iccom_dev , True)
 
              delete_iccom_device(device_name + str(i), None)
 
              # Check that sysfs channel file does not exists
-             check_sysfs_file_presence_expectation(iccom_device , False)
-
-        check_device_existance(device_name)
-
-def check_device_existance(device_regex):
-             # Check whether all iccom devices got deleted
-        command = "find /sys/devices/platform/ -iname *%s* 2> /dev/null | wc -l | awk '{printf $0}'" % (device_regex)
-        devices_num = subprocess.check_output(command, shell=True, text=True)
-        if (str(devices_num) != str(0)):
-           raise RuntimeError("Some iccom devices were not deleted: " + str(devices_num))
+             iccom_common.check_sysfs_file_presence_expectation(iccom_dev , False)
 
 def iccom_stress_data_communication_with_different_channels(
                 params, get_test_info=False):
@@ -763,7 +671,7 @@ def iccom_stress_data_communication_with_different_channels(
                      , "test_id": "iccom_test_5.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device"]
+        iccom_dev = params["iccom_dev"]
 
         ###### Test sequence ######
         gen_char_size = 10
@@ -772,7 +680,7 @@ def iccom_stress_data_communication_with_different_channels(
         number_of_channels = 10
 
         for ch in range(number_of_channels):
-            create_iccom_sysfs_channel(iccom_device, ch, None)
+            create_iccom_sysfs_channel(iccom_dev, ch, None)
 
         create_transport_device_RW_files(transport_dev, None)
 
@@ -794,7 +702,7 @@ def iccom_stress_data_communication_with_different_channels(
             answer_b = answer_str.encode('utf-8')
 
             # Send a message from ICCOM to Full Duplex Test Transport via the channel
-            iccom_send(iccom_device, ch, question_str, None)
+            iccom_send(iccom_dev, ch, question_str, None)
 
             # Default Transfer
             check_wire_xfer(transport_dev, iccom_package(sequence_number, bytearray())
@@ -810,7 +718,7 @@ def iccom_stress_data_communication_with_different_channels(
             check_wire_xfer_ack(transport_dev, None, None, "ack frame")
 
             # Check channel data
-            check_ch_data(iccom_device, ch, answer_str, None)
+            check_ch_data(iccom_dev, ch, answer_str, None)
             sequence_number += 2
 
 
@@ -822,48 +730,37 @@ def iccom_data_sysfs_fd_test_transport_RW_creation_deletion_checkup(
                      , "test_id": "iccom_test_6.python" }
 
         transport_dev = params["transport_dev"]
-        iccom_device = params["iccom_device"]
+        iccom_dev = params["iccom_dev"]
 
         ###### Test sequence ######
 
         transport_RW_file = "/sys/devices/platform/%s/transport_RW" % (transport_dev)
 
-        check_sysfs_file_presence_expectation(transport_RW_file , False)
+        iccom_common.check_sysfs_file_presence_expectation(transport_RW_file , False)
 
         create_transport_device_RW_files(transport_dev, None)
 
-        check_sysfs_file_presence_expectation(transport_RW_file , True)
+        iccom_common.check_sysfs_file_presence_expectation(transport_RW_file , True)
 
         delete_transport_device_RW_files(transport_dev, None)
 
-        check_sysfs_file_presence_expectation(transport_RW_file , False)
+        iccom_common.check_sysfs_file_presence_expectation(transport_RW_file , False)
 
-if __name__ == '__main__':
-        number_of_devices = 7
-        print("Inserting iccom.ko ..")
-        execute_shell_command("insmod /modules/iccom.ko")
+def run_tests(iccom_dev, fd_tt_dev):
 
-        print("Inserting fd_test_transport.ko ..")
-        execute_shell_command("insmod /modules/fd_test_transport.ko")
+        if(len(iccom_dev) != len(fd_tt_dev)):
+            print("Aborting! Iccom Tests assume that there will be the same amount of iccom and fd test transport devices")
+            return
+
+        number_of_devices = len(iccom_dev)
 
         output = iccom_version(None)
         print("ICCom revision: " + output)
 
-        # iccom py start
-
-        iccom_device = []
-        fd_test_transport_device = []
-
-        for i in range(number_of_devices):
-            iccom_device.append("iccom." + str(i))
-            fd_test_transport_device.append("fd_test_transport." + str(i))
-
         try:
-           # Create & Link iccom and Full Duplex Test Transport device instances
+           # Link iccom and Full Duplex Test Transport device instances
             for i in range(number_of_devices):
-                create_iccom_device(None)
-                create_fd_test_transport_device(None)
-                link_fd_test_transport_device_to_iccom_device(fd_test_transport_device[i], iccom_device[i], None)
+                link_fd_test_transport_device_to_iccom_device(fd_tt_dev[i], iccom_dev[i], None)
 
         except Exception as e:
             print("[Aborting!] Setup ICCom Tests failed!")
@@ -875,33 +772,33 @@ if __name__ == '__main__':
 
         # Test #1
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_data
-                   , {"transport_dev": fd_test_transport_device[0]
-                      , "iccom_device": iccom_device[0]})
+                   , {"transport_dev": fd_tt_dev[0]
+                      , "iccom_dev": iccom_dev[0]})
 
         # Test #2
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_without_transport_data
-                   , {"transport_dev": fd_test_transport_device[1]
-                      , "iccom_device": iccom_device[1]})
+                   , {"transport_dev": fd_tt_dev[1]
+                      , "iccom_dev": iccom_dev[1]})
 
         # Test #3
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_payload_size
-                   , {"transport_dev": fd_test_transport_device[2]
-                      , "iccom_device": iccom_device[2]})
+                   , {"transport_dev": fd_tt_dev[2]
+                      , "iccom_dev": iccom_dev[2]})
 
         #Test #4
         iccom_test(iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack
-                   , {"transport_dev": fd_test_transport_device[3]
-                      , "iccom_device": iccom_device[3]})
+                   , {"transport_dev": fd_tt_dev[3]
+                      , "iccom_dev": iccom_dev[3]})
 
         #Test #5
         iccom_test(iccom_data_sysfs_fd_test_transport_RW_creation_deletion_checkup
-                   , {"transport_dev": fd_test_transport_device[4]
-                      , "iccom_device": iccom_device[4]})
+                   , {"transport_dev": fd_tt_dev[4]
+                      , "iccom_dev": iccom_dev[4]})
 
         #Test #6
         iccom_test(iccom_stress_data_communication_with_different_channels
-                   , {"transport_dev": fd_test_transport_device[5]
-                      , "iccom_device": iccom_device[5]})
+                   , {"transport_dev": fd_tt_dev[5]
+                      , "iccom_dev": iccom_dev[5]})
 
         # Final Test #1
         iccom_test(iccom_check_devices_deletion
@@ -912,9 +809,3 @@ if __name__ == '__main__':
         iccom_test(fd_test_transport_check_devices_deletion
                     , {"device_name": "fd_test_transport."
                     , "number_of_devices": number_of_devices})
-
-        # iccom py end
-        print("Removing iccom.ko ..")
-        execute_shell_command("rmmod iccom.ko")
-        print("Removing fd_test_transport.ko ..")
-        execute_shell_command("rmmod fd_test_transport.ko")

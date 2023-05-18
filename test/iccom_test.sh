@@ -106,11 +106,3 @@ iccom_data_exchange_to_transport_with_iccom_data_with_transport_data() {
 
 # Main Execution
 
-insmod /modules/fd_test_transport.ko
-insmod /modules/iccom.ko
-
-iccom_data_exchange_to_transport_with_iccom_data_with_transport_data
-
-rmmod iccom
-rmmod fd_test_transport
-dmesg

@@ -19,6 +19,12 @@
 		stdout-path = &uart0;
 	};
 
+	iccomsk0: iccomsk0 {
+			compatible = "iccom_socket_if";
+			iccom_dev = <&iccom0>;
+			protocol_family = <22>;
+	};
+
 	iccom0: iccom0 {
 			compatible = "iccom";
 			transport_dev = <&fd_test_transport0>;
