@@ -109,15 +109,15 @@
 
 // to keep the compatibility with Kernel versions earlier than v5.5
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
-    #define pr_warning pr_warn
+	#define pr_warning pr_warn
 #endif
 
 #define iccom_socket_err(fmt, ...)					\
 	pr_err(ICCOM_SOCKETS_LOG_PREFIX"%s: "fmt"\n", __func__		\
-	       , ##__VA_ARGS__)
+		, ##__VA_ARGS__)
 #define iccom_socket_warning(fmt, ...)					\
 	pr_warning(ICCOM_SOCKETS_LOG_PREFIX"%s: "fmt"\n", __func__	\
-	       , ##__VA_ARGS__)
+		, ##__VA_ARGS__)
 #define iccom_socket_info(fmt, ...)					\
 	pr_info(ICCOM_SOCKETS_LOG_PREFIX"%s: "fmt"\n", __func__		\
 		, ##__VA_ARGS__)
@@ -238,7 +238,7 @@ struct iccom_sockets_device {
 	struct completion pump_main_loop_done;
 	struct completion socket_closed;
 
-        struct iccom_sk_loopback_mapping_rule *lback_map_rule;
+	struct iccom_sk_loopback_mapping_rule *lback_map_rule;
 };
 
 /* -------------------------- EXTERN VARS -------------------------------*/
@@ -284,12 +284,12 @@ static void __iccom_socket_netlink_data_ready(struct sk_buff *skb);
 //     <0: pointers are null
 int __iccom_socket_select_device_for_dispatching_msg_down(struct device *dev, void* data)
 {
-	if(IS_ERR_OR_NULL(dev)) {
+	if (IS_ERR_OR_NULL(dev)) {
 		iccom_socket_err("device is null");
 		return -EFAULT;
 	}
 
-	if(IS_ERR_OR_NULL(data)) {
+	if (IS_ERR_OR_NULL(data)) {
 		iccom_socket_err("data is null");
 		return -EFAULT;
 	}
@@ -304,7 +304,7 @@ int __iccom_socket_select_device_for_dispatching_msg_down(struct device *dev, vo
 
 	struct sk_buff *skb = (struct sk_buff *)data;
 
-	if(skb->sk != iccom_sockets_dev->socket) {
+	if (skb->sk != iccom_sockets_dev->socket) {
 		iccom_socket_info("Iccom socket device socket is different than the "
 					"received one. Msg not for this device but for other device.");
 		return ICCOM_SK_FIND_DISPATCH_DEVICE_ERR_DEVICE_NOT_FOUND;
@@ -328,7 +328,7 @@ static bool __iccom_socket_msg_rx_callback(
 		, void *consumer_data)
 {
 	struct iccom_sockets_device *iccom_sk
-		    = (struct iccom_sockets_device *)consumer_data;
+			= (struct iccom_sockets_device *)consumer_data;
 
 	ICCOM_SK_CHECK_DEVICE("", return false);
 
@@ -337,11 +337,11 @@ static bool __iccom_socket_msg_rx_callback(
 	// loopback mode for this channel was enabled, so external
 	// party is dropped from the loop channel
 	if (lback != 0) {
-	    return false;
+		return false;
 	}
 
 	__iccom_socket_dispatch_msg_up(iccom_sk, channel, msg_data
-				       , msg_len);
+					, msg_len);
 
 	// we will not take ownership over the msg_data
 	return false;
@@ -371,7 +371,7 @@ static int __iccom_socket_match_channel2lbackrule(
 		return 1;
 	}
 	if (channel >= rule->from + rule->shift
-		    && channel <= rule->to + rule->shift) {
+			&& channel <= rule->to + rule->shift) {
 		return -1;
 	}
 	return 0;
@@ -437,19 +437,19 @@ static int __iccom_socket_dispatch_msg_down(
 
 	if (!NLMSG_OK(nl_header, sk_buffer->len)) {
 		iccom_socket_warning("Broken netlink message to be sent:"
-				     " socket id: %d; ignored;"
-				     , channel_nr);
+					" socket id: %d; ignored;"
+					, channel_nr);
 		return -EINVAL;
 	}
 
 	iccom_socket_dbg_raw("-> TX data from user space (ch. %d):"
-			     , channel_nr);
+				, channel_nr);
 #ifdef ICCOM_SOCKET_DEBUG
 	print_hex_dump(KERN_DEBUG
-		       , ICCOM_SOCKETS_LOG_PREFIX"US -> TX data: "
-		       , 0, 16, 1, NLMSG_DATA(sk_buffer->data)
-		       , NLMSG_PAYLOAD(nl_header, 0)
-		       , true);
+			, ICCOM_SOCKETS_LOG_PREFIX"US -> TX data: "
+			, 0, 16, 1, NLMSG_DATA(sk_buffer->data)
+			, NLMSG_PAYLOAD(nl_header, 0)
+			, true);
 #endif
 
 	const int lback = __iccom_socket_match_channel2lbackrule(
@@ -500,7 +500,7 @@ static int __iccom_socket_dispatch_msg_up(
 
 	//   TODO: reuse allocated memory if possible
 	struct sk_buff *sk_buffer = alloc_skb(NLMSG_SPACE(data_size_bytes),
-					      GFP_KERNEL);
+						GFP_KERNEL);
 
 	if (IS_ERR_OR_NULL(sk_buffer)) {
 		iccom_socket_err("could not allocate socket buffer,"
@@ -520,15 +520,15 @@ static int __iccom_socket_dispatch_msg_up(
 	NETLINK_CB(sk_buffer).flags = 0;
 
 	iccom_socket_dbg_raw("<- data to User space (ch. %d):"
-			     , dst_port_id);
+				, dst_port_id);
 #ifdef ICCOM_SOCKET_DEBUG
 	print_hex_dump(KERN_DEBUG
-		       , ICCOM_SOCKETS_LOG_PREFIX"US <- RX data: "
-		       , 0, 16, 1, data, data_size_bytes, true);
+			, ICCOM_SOCKETS_LOG_PREFIX"US <- RX data: "
+			, 0, 16, 1, data, data_size_bytes, true);
 #endif
 
 	int res = netlink_unicast(iccom_sk->socket, sk_buffer, dst_port_id
-				  , MSG_DONTWAIT);
+					, MSG_DONTWAIT);
 
 	if (res >= 0) {
 		return 0;
@@ -559,7 +559,7 @@ static int __iccom_socket_reg_socket_family(
 			, .cb_mutex = NULL
 			, .bind = NULL
 			, .compare = NULL
-		    } ;
+			} ;
 	// TODO: optionally: add support for earlier versions of kernel
 	iccom_sk->socket = netlink_kernel_create(&init_net
 						 , iccom_sk->protocol_family_id
@@ -580,7 +580,7 @@ static void __iccom_socket_unreg_socket_family(
 		struct iccom_sockets_device *iccom_sk)
 {
 	if (IS_ERR_OR_NULL(iccom_sk)
-		    || IS_ERR_OR_NULL(iccom_sk->socket)) {
+			|| IS_ERR_OR_NULL(iccom_sk->socket)) {
 		return;
 	}
 	iccom_sk->exiting = true;
@@ -595,54 +595,54 @@ static void __iccom_socket_unreg_socket_family(
 // RETURNS:
 //      >= 0: number of bytes actually provided to user space, on success
 //      < 0: negated error code, on failure
-static ssize_t read_loopback_rule_show(struct device *dev, 
-                                        struct device_attribute *attr,
-                                        char *buf)
+static ssize_t read_loopback_rule_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
 {
-        ICCOM_SK_CHECK_PTR(buf, return -EINVAL);
+	ICCOM_SK_CHECK_PTR(buf, return -EINVAL);
 
-        struct iccom_sockets_device *iccom_sk
-                = (struct iccom_sockets_device *)dev_get_drvdata(dev);
+	struct iccom_sockets_device *iccom_sk
+		= (struct iccom_sockets_device *)dev_get_drvdata(dev);
 
-        if(IS_ERR_OR_NULL(iccom_sk)) {
-                iccom_socket_err("Invalid parameters.");
-                return -EINVAL;
-        }
+	if (IS_ERR_OR_NULL(iccom_sk)) {
+		iccom_socket_err("Invalid parameters.");
+		return -EINVAL;
+	}
 
 	const int BUFFER_SIZE = 256;
 
-        char *buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
+	char *buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
 
-        if (IS_ERR_OR_NULL(buffer)) {
-                iccom_socket_err("failed to create new buffer:"
-                                 " no memory");
-                return -ENOMEM;
-        }
+	if (IS_ERR_OR_NULL(buffer)) {
+		iccom_socket_err("failed to create new buffer:"
+				 " no memory");
+		return -ENOMEM;
+	}
 
 	const struct iccom_sk_loopback_mapping_rule *const rule
-			    = iccom_sk->lback_map_rule;
+				= iccom_sk->lback_map_rule;
 
-        size_t len = (size_t)snprintf(buffer, BUFFER_SIZE, "%d %d %d\n\n"
-                                      "NOTE: the loopback will map the "
-                                      "[a;b] channels other sides to"
-                                      " [a + shift; b + shift] local "
-                                      "channels where a = first argument"
-                                      ", b = second argument,"
-                                      " shift = third argument\n"
-                                      , rule->from, rule->to, rule->shift)
-                     + 1;
+	size_t len = (size_t)snprintf(buffer, BUFFER_SIZE, "%d %d %d\n\n"
+					"NOTE: the loopback will map the "
+					"[a;b] channels other sides to"
+					" [a + shift; b + shift] local "
+					"channels where a = first argument"
+					", b = second argument,"
+					" shift = third argument\n"
+					, rule->from, rule->to, rule->shift)
+			+ 1;
 
-        if (len > BUFFER_SIZE) {
-                iccom_socket_warning("loopback control output "
-                                     "was too big for buffer"
-                                     ", required length: %zu", len);
-                len = BUFFER_SIZE;
-                buffer[BUFFER_SIZE - 1] = 0;
-        }
+	if (len > BUFFER_SIZE) {
+		iccom_socket_warning("loopback control output "
+					"was too big for buffer"
+					", required length: %zu", len);
+		len = BUFFER_SIZE;
+		buffer[BUFFER_SIZE - 1] = 0;
+	}
 
-        kfree(buffer);
+	kfree(buffer);
 
-        return len;
+	return len;
 }
 static DEVICE_ATTR_RO(read_loopback_rule);
 
@@ -719,49 +719,49 @@ int  __iccom_sk_parse_lback_string(char *const buf
 //      >= 0: number of bytes actually were written, on success
 //      < 0: negated error code, on failure
 static ssize_t set_loopback_rule_store(struct device *dev, 
-                                        struct device_attribute *attr,
-                                        const char *buf, size_t count)
+					struct device_attribute *attr,
+					const char *buf, size_t count)
 {
-        ICCOM_SK_CHECK_PTR(buf, return -EINVAL);
+	ICCOM_SK_CHECK_PTR(buf, return -EINVAL);
 
-        struct iccom_sockets_device *iccom_sk
-                = (struct iccom_sockets_device *)dev_get_drvdata(dev);
-        int ret = 0;
+	struct iccom_sockets_device *iccom_sk
+		= (struct iccom_sockets_device *)dev_get_drvdata(dev);
+	int ret = 0;
 
-        if(IS_ERR_OR_NULL(iccom_sk)) {
-                iccom_socket_err("Invalid parameters.");
-                return -EINVAL;
-        }
+	if (IS_ERR_OR_NULL(iccom_sk)) {
+		iccom_socket_err("Invalid parameters.");
+		return -EINVAL;
+	}
 
 	const unsigned int BUFFER_SIZE = 64;
 
-        // we only get the whole data at once
-        if (count > BUFFER_SIZE) {
-                iccom_socket_warning(
-                        "Ctrl message should be written at once"
-                        " and not exceed %u bytes.", BUFFER_SIZE);
-                return -EFAULT;
-        }
+	// we only get the whole data at once
+	if (count > BUFFER_SIZE) {
+		iccom_socket_warning(
+			"Ctrl message should be written at once"
+			" and not exceed %u bytes.", BUFFER_SIZE);
+		return -EFAULT;
+	}
 
-        char *buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
+	char *buffer = kmalloc(BUFFER_SIZE, GFP_KERNEL);
 
-        if (IS_ERR_OR_NULL(buffer)) {
-                iccom_socket_err("failed to create new rule buffer:"
-                                 " no memory");
-                return -ENOMEM;
-        }
-        memcpy(buffer, buf, count);
+	if (IS_ERR_OR_NULL(buffer)) {
+		iccom_socket_err("failed to create new rule buffer:"
+				 " no memory");
+		return -ENOMEM;
+	}
+	memcpy(buffer, buf, count);
 
-        struct iccom_sk_loopback_mapping_rule parsing_res;
-        ret = __iccom_sk_parse_lback_string(buffer, count, &parsing_res);
-        if (ret < 0) {
-                iccom_socket_warning("Parsing failed: %s", buffer);
-                goto finalize;
-        }
+	struct iccom_sk_loopback_mapping_rule parsing_res;
+	ret = __iccom_sk_parse_lback_string(buffer, count, &parsing_res);
+	if (ret < 0) {
+		iccom_socket_warning("Parsing failed: %s", buffer);
+		goto finalize;
+	}
 
 	struct iccom_sk_loopback_mapping_rule * new_rule
-			    = (struct iccom_sk_loopback_mapping_rule *)
-			      kmalloc(sizeof(*new_rule), GFP_KERNEL);
+				= (struct iccom_sk_loopback_mapping_rule *)
+					kmalloc(sizeof(*new_rule), GFP_KERNEL);
 	if (IS_ERR_OR_NULL(new_rule)) {
 		iccom_socket_err("failed to create new loopback rule:"
 				 " no memory");
@@ -771,7 +771,7 @@ static ssize_t set_loopback_rule_store(struct device *dev,
 	*new_rule = parsing_res;
 
 	struct iccom_sk_loopback_mapping_rule *tmp_ptr
-			    = iccom_sk->lback_map_rule;
+				= iccom_sk->lback_map_rule;
 	WRITE_ONCE(iccom_sk->lback_map_rule, new_rule);
 
 	if (!IS_ERR_OR_NULL(tmp_ptr)) {
@@ -803,12 +803,12 @@ static int __iccom_sk_loopback_ctl_init(
 {
 	ICCOM_SK_CHECK_DEVICE("", return -ENODEV);
 
-        iccom_sk->lback_map_rule = NULL;
+	iccom_sk->lback_map_rule = NULL;
 
 	// initial rule data
 	iccom_sk->lback_map_rule = (struct iccom_sk_loopback_mapping_rule *)
-				   kmalloc(sizeof(*iccom_sk->lback_map_rule)
-					   , GFP_KERNEL);
+					kmalloc(sizeof(*iccom_sk->lback_map_rule)
+						, GFP_KERNEL);
 	if (IS_ERR_OR_NULL(iccom_sk->lback_map_rule)) {
 		iccom_socket_err("failed to create loopback rule:"
 				 " no memory");
@@ -816,7 +816,7 @@ static int __iccom_sk_loopback_ctl_init(
 	}
 	memset(iccom_sk->lback_map_rule, 0, sizeof(*iccom_sk->lback_map_rule));
 
-        return 0;
+	return 0;
 }
 
 // Closes the iccom sk loopback controller
@@ -826,13 +826,13 @@ static void __iccom_sk_loopback_ctl_close(
 	ICCOM_SK_CHECK_DEVICE("", return);
 
 	if (!IS_ERR_OR_NULL(iccom_sk->lback_map_rule)) {
-	    struct iccom_sk_loopback_mapping_rule *ptr
+		struct iccom_sk_loopback_mapping_rule *ptr
 			= iccom_sk->lback_map_rule;
-	    iccom_sk->lback_map_rule = NULL;
+		iccom_sk->lback_map_rule = NULL;
 
-            kfree(ptr);
-            ptr = NULL;
-        }
+		kfree(ptr);
+		ptr = NULL;
+	}
 }
 
 // Closes underlying protocol layer.
@@ -840,7 +840,7 @@ static void __iccom_socket_protocol_device_close(
 		struct iccom_sockets_device *iccom_sk)
 {
 	if (IS_ERR_OR_NULL(iccom_sk)
-		    || !iccom_is_running(iccom_sk->iccom)) {
+			|| !iccom_is_running(iccom_sk->iccom)) {
 		return;
 	}
 	iccom_sk->exiting = true;
@@ -938,7 +938,7 @@ static int iccom_skif_run(struct iccom_sockets_device *iccom_sk)
 		goto failed;
 	}
 	iccom_socket_info_raw("opened kernel netlink socket: %px"
-			      , iccom_sk->socket);
+				, iccom_sk->socket);
 	res = __iccom_socket_protocol_device_init(iccom_sk);
 	if (res < 0) {
 		goto failed;
@@ -990,7 +990,7 @@ static int iccom_skif_stop(struct iccom_sockets_device *iccom_sk)
 //      0: length of data is zero - no data
 //      > 0: data size of data to be showed in user space
 static ssize_t version_show(struct class *class, struct class_attribute *attr,
-                            char *buf) 
+				char *buf) 
 {
 	ICCOM_SK_CHECK_SYSFS_CLASS_PARAMS("", return -EINVAL);
 
@@ -1014,7 +1014,7 @@ static ssize_t delete_device_store(struct class *class, struct class_attribute *
 
 	if (count >= PAGE_SIZE) {
 		iccom_socket_err("Input data is longer than expected (%lu)", 
-				  PAGE_SIZE);
+					PAGE_SIZE);
 		return -EINVAL;
 	}
 
@@ -1063,7 +1063,7 @@ static CLASS_ATTR_WO(delete_device);
 // return:
 //      count - all data processed
 static ssize_t create_device_store(struct class *class, struct class_attribute *attr,
-				   const char *buf, size_t count)
+					const char *buf, size_t count)
 {
 	ICCOM_SK_CHECK_SYSFS_CLASS_PARAMS("", return -EINVAL);
 
@@ -1076,7 +1076,7 @@ static ssize_t create_device_store(struct class *class, struct class_attribute *
 	struct platform_device * new_pdev;
 
 	new_pdev = platform_device_register_simple("iccom_socket_if", device_id,
-						    NULL, 0);
+							NULL, 0);
 	if (IS_ERR_OR_NULL(new_pdev)) {
 		iccom_socket_err("Could not register the device iccom socket.%d",
 				 device_id);
@@ -1089,18 +1089,18 @@ static ssize_t create_device_store(struct class *class, struct class_attribute *
 static CLASS_ATTR_WO(create_device);
 
 static struct attribute *iccom_socket_if_class_attrs[] = {
-    &class_attr_version.attr,
-    &class_attr_create_device.attr,
-    &class_attr_delete_device.attr,
-    NULL
+	&class_attr_version.attr,
+	&class_attr_create_device.attr,
+	&class_attr_delete_device.attr,
+	NULL
 };
 
 ATTRIBUTE_GROUPS(iccom_socket_if_class);
 
 static struct class iccom_socket_if_class = {
-    .name = "iccom_socket_if",
-    .owner = THIS_MODULE,
-    .class_groups = iccom_socket_if_class_groups
+	.name = "iccom_socket_if",
+	.owner = THIS_MODULE,
+	.class_groups = iccom_socket_if_class_groups
 };
 
 // Iccom_dev_show - checks if iccom device is already associated to iccom socket
@@ -1112,12 +1112,12 @@ static struct class iccom_socket_if_class = {
 // return:
 //      bytes - message with status
 static ssize_t iccom_dev_show(struct device *dev, struct device_attribute *attr,
-                              char *buf) 
+				char *buf) 
 {
 	ICCOM_SK_CHECK_SYSFS_DEVICE_PARAMS("", return -EINVAL);
 
 	struct iccom_sockets_device *iccom_sockets_dev = 
-			    (struct iccom_sockets_device *)dev_get_drvdata(dev);
+				(struct iccom_sockets_device *)dev_get_drvdata(dev);
 
 	if (IS_ERR_OR_NULL(iccom_sockets_dev)) {
 		iccom_socket_err("Invalid parameters.");
@@ -1147,12 +1147,12 @@ invalid_input:
 // return:
 //      count - all data processed
 static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr,
-			   const char *buf, size_t count)
+				const char *buf, size_t count)
 {
 	ICCOM_SK_CHECK_SYSFS_DEVICE_PARAMS("", return -EINVAL);
 
 	struct iccom_sockets_device *iccom_sockets_dev = 
-			    (struct iccom_sockets_device *)dev_get_drvdata(dev);
+				(struct iccom_sockets_device *)dev_get_drvdata(dev);
 
 	if (IS_ERR_OR_NULL(iccom_sockets_dev)) {
 		iccom_socket_err("Invalid iccom sockets device.");
@@ -1166,7 +1166,7 @@ static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr
 	
 	if (count >= PAGE_SIZE) {
 		iccom_socket_err("Input data is longer than expected (%lu)", 
-				  PAGE_SIZE);
+					PAGE_SIZE);
 		return -EINVAL;
 	}
 
@@ -1190,7 +1190,7 @@ static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr
 	struct device *iccom_dev_to_link;
 
 	iccom_dev_to_link = bus_find_device_by_name(&platform_bus_type, NULL, 
-						    device_name);
+							device_name);
 
 	kfree(device_name);
 
@@ -1226,7 +1226,7 @@ static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr
 	}
 
 	iccom_socket_info("Iccom device binding to Iccom socket device was "
-			  "sucessful");
+				"sucessful");
 	return count;
 }
 static DEVICE_ATTR_RW(iccom_dev);
@@ -1279,7 +1279,7 @@ static ssize_t protocol_family_store(struct device *dev,
 	ICCOM_SK_CHECK_SYSFS_DEVICE_PARAMS("", return -EINVAL);
 
 	struct iccom_sockets_device *iccom_sk_dev = 
-			    (struct iccom_sockets_device *)dev_get_drvdata(dev);
+				(struct iccom_sockets_device *)dev_get_drvdata(dev);
 
 	if (IS_ERR_OR_NULL(iccom_sk_dev)) { 
 		iccom_socket_err("Invalid parameters.");
@@ -1301,7 +1301,7 @@ static ssize_t protocol_family_store(struct device *dev,
 
 	if (count >= PAGE_SIZE) {
 		iccom_socket_err("Input data is longer than expected (%lu)", 
-				  PAGE_SIZE);
+					PAGE_SIZE);
 		return -EINVAL;
 	}
 
@@ -1336,7 +1336,7 @@ static struct attribute *iccom_socket_if_dev_attrs[] = {
 	&dev_attr_protocol_family.attr,
 	&dev_attr_read_loopback_rule.attr,
 	&dev_attr_set_loopback_rule.attr,
-        NULL,
+	NULL,
 };
 
 ATTRIBUTE_GROUPS(iccom_socket_if_dev);
@@ -1368,7 +1368,7 @@ static int iccom_skif_validate_protocol_family(struct platform_device *pdev,
 
 	if (*protocol_family == PROTOCOL_FAMILY_RESET_VALUE) {
 		iccom_socket_warning("Protocol family property is not defined "
-				     "or does not have a value");
+					"or does not have a value");
 		*protocol_family = iccom_skif_find_unused_protocol_family(pdev);
 		if (*protocol_family == PROTOCOL_FAMILY_RESET_VALUE) {
 			iccom_socket_err("Failed to get available protocol "
@@ -1377,8 +1377,8 @@ static int iccom_skif_validate_protocol_family(struct platform_device *pdev,
 		}
 
 		iccom_socket_info("Setting a new protocol family value %d "
-				  "to device %s", *protocol_family, 
-				  pdev->dev.kobj.name);
+					"to device %s", *protocol_family, 
+					pdev->dev.kobj.name);
 		return 0;
 	} else if (*protocol_family < NETLINK_ICCOM) {
 		iccom_socket_err("Protocol family property has a not supported "
@@ -1509,7 +1509,7 @@ static int iccom_socket_if_probe(struct platform_device *pdev)
 
 	iccom_skif_dev_data = (struct iccom_sockets_device *)
 				 kzalloc(sizeof(struct iccom_sockets_device), 
-					  GFP_KERNEL);
+						GFP_KERNEL);
 	if (IS_ERR_OR_NULL(iccom_skif_dev_data)) {
 		iccom_socket_err("Probing a Iccom Socket Device failed: no "
 				 "available space");
@@ -1551,21 +1551,21 @@ free_iccom_skif_data:
 static int iccom_socket_if_remove(struct platform_device *pdev)
 {
 	if (IS_ERR_OR_NULL(pdev)) {
-	       goto invalid_params;
+		goto invalid_params;
 	}
 	iccom_socket_info("Removing an Iccom Sk Device with id: %d", pdev->id);
 
 	struct iccom_sockets_device *iccom_sockets_dev;
 
 	iccom_sockets_dev = (struct iccom_sockets_device *)
-					       dev_get_drvdata(&pdev->dev);
+						dev_get_drvdata(&pdev->dev);
 	if (IS_ERR_OR_NULL(iccom_sockets_dev)) {
-	       goto invalid_params;
+		goto invalid_params;
 	}
 
 	int res = iccom_skif_close(iccom_sockets_dev);
 	if (res < 0) {
-	       iccom_socket_err("Module closing failed, err: %d", -res);
+		iccom_socket_err("Module closing failed, err: %d", -res);
 	}
 
 	kfree(iccom_sockets_dev);
@@ -1574,8 +1574,8 @@ static int iccom_socket_if_remove(struct platform_device *pdev)
 	return 0;
 
 invalid_params:
-       iccom_socket_warning("Removing a Iccom Device failed - NULL pointer!");
-       return -EINVAL;
+	iccom_socket_warning("Removing a Iccom Device failed - NULL pointer!");
+	return -EINVAL;
 }
 
 struct of_device_id iccom_socket_if_driver_id[] = {
@@ -1609,7 +1609,7 @@ static void __iccom_socket_netlink_data_ready(struct sk_buff *skb)
 	int ret = driver_for_each_device(&iccom_socket_driver.driver, NULL, skb,
 				&__iccom_socket_select_device_for_dispatching_msg_down);
 
-	if(ret != ICCOM_SK_FIND_DISPATCH_DEVICE_SUCESS) {
+	if (ret != ICCOM_SK_FIND_DISPATCH_DEVICE_SUCESS) {
 		iccom_socket_err("Failed to dispatch msg down for the "
 					" iccom sk device. Error code: %d", ret);
 	}
