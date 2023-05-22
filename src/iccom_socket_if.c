@@ -261,7 +261,7 @@ static void __iccom_socket_netlink_data_ready(struct sk_buff *skb);
 
 /* --------------------- ENTRY POINTS -----------------------------------*/
 
-// Searchs the iccom socket device that shall transmit the msg
+// Searches the iccom socket device that shall transmit the msg
 // received from userspace down to the corresponding iccom instance.
 // The search is done by comparing the socket id from socket buffer
 // and iccom socket device socket id.
@@ -605,9 +605,6 @@ static ssize_t read_loopback_rule_show(struct device *dev,
 
 	const struct iccom_sk_loopback_mapping_rule *const rule
 				= iccom_sk->lback_map_rule;
-
-	return scnprintf(buf, PAGE_SIZE, "%s", ICCOM_VERSION);
-
 
 	size_t len = (size_t)scnprintf(buf, PAGE_SIZE, "%d %d %d\n\n"
 					"NOTE: the loopback will map the "
@@ -1116,20 +1113,17 @@ static ssize_t iccom_dev_show(struct device *dev, struct device_attribute *attr,
 
 	if (IS_ERR_OR_NULL(iccom_sk)) {
 		iccom_socket_err("Invalid parameters.");
-		goto invalid_input;
+		return 0;
 	}
 
 	if (IS_ERR_OR_NULL(iccom_sk->iccom)) {
 		iccom_socket_err("Iccom Sk has no Iccom device "
 				 "associtated/invalid.");
-		goto invalid_input;
+		return 0;
 	}
 
 	return scnprintf(buf, PAGE_SIZE, "Iccom Sk has an Iccom device already "
 				"associated: %s", kobject_name(&(dev->kobj)));
-
-invalid_input:
-	return 0;
 }
 
 // The sysfs iccom_dev_store function get's triggered
@@ -1186,10 +1180,8 @@ static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr
 		return -EFAULT;
 	}
 
-	struct device *iccom_dev_to_link;
-
-	iccom_dev_to_link = bus_find_device_by_name(&platform_bus_type, NULL, 
-							device_name);
+	struct device *iccom_dev_to_link = 
+			bus_find_device_by_name(&platform_bus_type, NULL, device_name);
 
 	kfree(device_name);
 	device_name = NULL;
@@ -1206,16 +1198,15 @@ static ssize_t iccom_dev_store(struct device *dev, struct device_attribute *attr
 		return -EINVAL;
 	}
 
-	struct iccom_dev *iccom_dev;
-
-	iccom_dev = (struct iccom_dev *) dev_get_drvdata(iccom_dev_to_link);
-	if (IS_ERR_OR_NULL(iccom_dev)) {
+	struct iccom_dev *iccom = 
+			(struct iccom_dev *) dev_get_drvdata(iccom_dev_to_link);
+	if (IS_ERR_OR_NULL(iccom)) {
 		device_link_del(link);
 		iccom_socket_err("Iccom device given as input is invalid.");
 		return -EINVAL;
 	}
 
-	iccom_sk->iccom = iccom_dev;
+	iccom_sk->iccom = iccom;
 
 	int ret = 0;
 	ret = iccom_socket_run(iccom_sk);
@@ -1485,9 +1476,9 @@ static int iccom_socket_device_tree_node_setup(struct platform_device *pdev,
 		return -EINVAL;
 	}
 
-	struct iccom_dev *iccom_dev_data = (struct iccom_dev *) 
+	struct iccom_dev *iccom = (struct iccom_dev *) 
 				dev_get_drvdata(&iccom_pdev->dev);
-	if (IS_ERR_OR_NULL(iccom_dev_data)) {
+	if (IS_ERR_OR_NULL(iccom)) {
 		device_link_del(link);
 		iccom_sk_reset_protocol_family(iccom_sk);
 		iccom_socket_err("Unable to get Iccom device specified by "
@@ -1495,7 +1486,7 @@ static int iccom_socket_device_tree_node_setup(struct platform_device *pdev,
 		return -EPROBE_DEFER;
 	}
 
-	iccom_sk->iccom = iccom_dev_data;
+	iccom_sk->iccom = iccom;
 
 	ret = iccom_socket_run(iccom_sk);
 	if (ret != 0) {
@@ -1638,9 +1629,9 @@ struct platform_driver iccom_socket_driver = {
 // @skb {valid ptr} socket buffer containing the data and socket id
 static void __iccom_socket_netlink_data_ready(struct sk_buff *skb)
 {
-	// NOTE: This kernel function will loop the devices till some device
-	//       has the same socket id which will then stop the loop and send
-	//       the data to the proper channel right away
+	// NOTE: This kernel function will loop the iccom socket devices till
+	//       one of the devices socket id matches the skb socket id. Then it
+	//       the msg from skb will be dispatched through the found iccom socket device
 	int ret = driver_for_each_device(&iccom_socket_driver.driver, NULL, skb,
 				&__iccom_socket_select_device_for_dispatching_msg_down);
 
