@@ -26,16 +26,16 @@ def set_socket_protocol_family(protocol_family_number, iccom_sk_dev, err_expecta
         command = "%d" % (protocol_family_number)
         iccom_common.write_sysfs_file(file, command, err_expectation)
 
-def test_set_not_valid_protocol_family(params, get_test_info=False):
+def test_try_changing_protocol_family_after_initialization(params, get_test_info=False):
 
         if (get_test_info):
-            return { "test_description": "iccom sk -> set not valid protocol family -> iccom sk"
+            return { "test_description": "iccom sk -> try setting protocol family after initialization -> iccom sk"
                      , "test_id": "iccom_sk_test_1.python" }
 
         iccom_sk_dev = params["iccom_sk_dev"]
 
-        # Try to set a value not valid, less than 22 (NETLINK)
-        set_socket_protocol_family(-1, iccom_sk_dev, errno.EPFNOSUPPORT)
+        # Try to set again the family protocol
+        set_socket_protocol_family(28, iccom_sk_dev, errno.EPFNOSUPPORT)
 
 
     # computes alligned netlink message space
@@ -149,7 +149,7 @@ def run_tests(iccom_sk_dev, iccom_dev, fd_tt_dev):
             os._exit(os.EX_IOERR)
 
         # Test #1
-        iccom_sk_test(test_set_not_valid_protocol_family
+        iccom_sk_test(test_try_changing_protocol_family_after_initialization
                    , {"iccom_sk_dev": iccom_sk_dev[0]})
 
         # Test #2
