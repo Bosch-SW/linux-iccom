@@ -92,7 +92,7 @@ def create_netlink_msg(payload, priority):
 # RETURNS: The payload message extracted
 def extract_netlink_data(netlink_msg):
         netlink_message_length = ((netlink_msg[1] << 8) or netlink_msg[0])
-        
+
         start_payload = NLMSG_HDR_SIZE_BYTES
         payload_length = netlink_message_length - NLMSG_HDR_SIZE_BYTES
 
@@ -148,7 +148,7 @@ def iccom_sk_data_exchange_to_transport_with_iccom_data_with_transport_data(
                                          , iccom.iccom_package(1, bytearray())
                             , None, None, "first data frame")
             iccom.check_wire_xfer_ack(transport_dev, None, None, "first ack frame")
-    
+
             # Actual data xfer
             iccom.check_wire_xfer(transport_dev
                             , iccom.iccom_package(2, iccom.iccom_packet(channel, bytearray(b"I am Luis"), True))
@@ -200,7 +200,7 @@ def run_tests(iccom_sk_dev, iccom_dev, fd_tt_dev):
         number_of_devices = len(iccom_dev)
 
         # NETLINK_ICCOM
-        protocol_family = 22 
+        protocol_family = 22
 
         try:
            # Create & Link iccom and Full Duplex Test Transport device instances

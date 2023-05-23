@@ -25,14 +25,14 @@ config BOSCH_ICCOM_SOCKETS
 
 config BOSCH_ICCOM_TEST_MODULE
     bool "Build test module for Bosch ICCom driver"
-    depends on BOSCH_ICCOM && BOSCH_FULL_DUPLEX_MIRROR_DEVICE 
+    depends on BOSCH_ICCOM && BOSCH_FULL_DUPLEX_MIRROR_DEVICE
     default n
     ---help---
         Set this to Y if you want to build the
         separate ICCom driver test module, which
         will conduct all ICCom tests upon insertion
         in the kernel.
-        
+
         NOTE: if full tests (using Symspi device driver) are
             enabled then this will require also BOSCH_SYMSPI
             to be set.

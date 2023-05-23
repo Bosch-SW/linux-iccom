@@ -84,7 +84,7 @@ iccom_data_exchange_to_transport_with_iccom_data_with_transport_data() {
     create_iccom_sysfs_channel ${iccom_dev} ${channel}
     create_transport_device_RW_files ${transport_dev}
     iccom_send ${iccom_dev} ${channel} "Who are you?"
-    
+
     local send_data=000001ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb8c8b346
     local exp_data=000001ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb8c8b346
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
@@ -92,7 +92,7 @@ iccom_data_exchange_to_transport_with_iccom_data_with_transport_data() {
     send_data=d0
     exp_data=d0
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
-    
+
     send_data=000d02000900814920616d204c756973ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff513d7dd4
     exp_data=001002000c008157686f2061726520796f753fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff788d44db
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}

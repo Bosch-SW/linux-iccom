@@ -303,12 +303,12 @@ def iccom_package(package_sequential_number, package_payload):
 
     package_header = bytearray((len(package_payload)).to_bytes(2, "big")
                                + package_sequential_number.to_bytes(1, "little"))
-                     
+
     padding_size = (PACKAGE_SIZE_BYTES - len(package_header)
-                    - len(package_payload) - CRC32_SIZE_BYTES) 
-    
+                    - len(package_payload) - CRC32_SIZE_BYTES)
+
     padded_package = package_header + package_payload + bytearray(padding_size * b"\xff")
-    
+
     crc32 = zlib.crc32(padded_package)
 
     full_package = padded_package + bytearray(crc32.to_bytes(CRC32_SIZE_BYTES, "little"))
@@ -627,7 +627,7 @@ def iccom_check_devices_deletion(
         number_of_devices = params["number_of_devices"]
 
         ###### Test sequence ######
-        
+
         for i in range(number_of_devices):
              iccom_dev = "/sys/devices/platform/%s" % (device_name + str(i))
 
@@ -685,7 +685,7 @@ def iccom_stress_data_communication_with_different_channels(
         create_transport_device_RW_files(transport_dev, None)
 
         for i in range(1, number_of_msgs+1):
-            
+
             ch = random.randint(0,number_of_channels-1)
             # Increment the size of question and answer
             # which get's generated from 1 to 50 bytes of

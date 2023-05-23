@@ -469,7 +469,7 @@ Destroy ICCom sysfs channel
 sudo sh -c "echo d1 > /sys/devices/platform/iccom.0/channels_ctl"
 
 # delete channel 2 for iccom.0
-sudo sh -c "echo d2 > /sys/devices/platform/iccom.0/channels_ctl" 
+sudo sh -c "echo d2 > /sys/devices/platform/iccom.0/channels_ctl"
 
 ```
 Select ICCom testing channel
@@ -480,7 +480,7 @@ Select ICCom testing channel
 sudo sh -c "echo s1 > /sys/devices/platform/iccom.0/channels_ctl"
 
 # delete channel 2 for iccom.0
-sudo sh -c "echo s2 > /sys/devices/platform/iccom.0/channels_ctl" 
+sudo sh -c "echo s2 > /sys/devices/platform/iccom.0/channels_ctl"
 ```
 
 Send data to ICCom
@@ -500,9 +500,9 @@ Read data to ICCom
 cat /sys/devices/platform/iccom.0/channels_RW"
 ```
 
-Create/delete RW file for Full Duplex Test Transport 
+Create/delete RW file for Full Duplex Test Transport
 ```
-# Create RW file in fd_test_transport.0/ 
+# Create RW file in fd_test_transport.0/
 sudo sh -c "echo c > /sys/devices/platform/fd_test_transport.0/transport_ctl"
 
 # Destroy RW file in fd_test_transport.0/
@@ -538,13 +538,13 @@ configurations require to be groomed.
 
 The `Iccom sockets if` implementation has proven its functionality when running
 in the physical environment, in a physical target device. However, its configuration
-and the possibility to work in a development environment where the physical 
+and the possibility to work in a development environment where the physical
 target is not available, highlighted this driver's low flexibility aspect.
-In order to enable one to easily test and run this driver in a development 
+In order to enable one to easily test and run this driver in a development
 environment where the actual target is not available, sysfs facilities are now
 encompassed in the `Iccom sockets if` platform driver implementation.
-This sysfs implementation will allow one to trigger the iccom sockets if device 
-creation, its configuration (e.g., protocol family) and to do dynamic linkage 
+This sysfs implementation will allow one to trigger the iccom sockets if device
+creation, its configuration (e.g., protocol family) and to do dynamic linkage
 from a created `Iccom sockets if` to an existing iccom device.
 Using the test python scripts globally available to the iccom world (i.e., `Iccom`,
 `Iccom sockets if` and `transport` drivers) one will be able to test individually
@@ -554,32 +554,32 @@ each driver and, moreover, test the data path from the transport layer to the
 ## Iccom Sockets sysfs class and device attributes
 
 The sysfs implementation for the `Iccom sockets if` means that nowadays there is a
-new Iccom Sockets If class. This class allows to create the several `Iccom sockets if` 
-devices to be used alongside the development activities. With these `Iccom sockets if` 
+new Iccom Sockets If class. This class allows to create the several `Iccom sockets if`
+devices to be used alongside the development activities. With these `Iccom sockets if`
 devices comes their attributes that will allow to configure
 and test the desired `Iccom` channels (and transport layer), for example. All
-these configuration and testing activities are accomplished without having a 
+these configuration and testing activities are accomplished without having a
 dependency with a physical target device that most of the times is not available
-at early project stages. 
+at early project stages.
 
 ### Iccom sockets if class
 
-This class allows to group all devices from the `Iccom sockets if` since they all 
+This class allows to group all devices from the `Iccom sockets if` since they all
 share the same functionality. Additionaly, using the sysfs filesystem there is
-a way of interfacing with the `Iccom sockets if` driver that is defined in the 
+a way of interfacing with the `Iccom sockets if` driver that is defined in the
 Kernel space.
-Currently there are two attributes available for the `Iccom sockets if`: one to 
+Currently there are two attributes available for the `Iccom sockets if`: one to
 create `Iccom sockets if` devices [(create_device)](#1211-create_device) and the
 other to get the version/revision from the `Iccom sockets if` driver [(version)](#1212-version).
 
 #### *create_device*
 
 In order to create an `Iccom sockets if` device the following command can be
-issued and automatically it will set the device name and its id. 
+issued and automatically it will set the device name and its id.
 
 	echo > /sys/class/iccom_socket_if/create_device
 
-This will result in a new device, completely registered and with a set of 
+This will result in a new device, completely registered and with a set of
 attributes that can be used to configure it.
 
 #### *delete_device*
@@ -589,8 +589,8 @@ An existing `Iccom sockets if` device can be deleted with a specific command:
 	echo 'iccom_sk_if_dev_name' > /sys/class/iccom_socket_if/create_device
 
 It will automatically release this device and free its resources. An important
-note concerns with the relationship between devices (iccom sk, iccom and 
-transport layers). This aspect needs to be taken into consideration for the 
+note concerns with the relationship between devices (iccom sk, iccom and
+transport layers). This aspect needs to be taken into consideration for the
 correct managing of such devices and to not break the dependency chain.
 
 #### *version*
@@ -604,12 +604,12 @@ driver implementation it provides. The following command returns this informatio
 ### Iccom sockets if device attributes
 
 With each `Iccom sockets if` device created, a set of attributes get exposed for
-configuration needs. These attributes compose the configuration part of each 
+configuration needs. These attributes compose the configuration part of each
 device.
 
 #### *protocol_family*
 
-The **protocol_family** makes possible the configuration of the socket's 
+The **protocol_family** makes possible the configuration of the socket's
 protocol family that is part of an `Iccom sockets if` device. Each device has to
 have a socket with different protocol family.
 
@@ -617,7 +617,9 @@ have a socket with different protocol family.
 
 Since this protocol family attribute is related to a netlink socket, only a
 range of values is possible for the same. Therefore, only protocol family numbers
-starting from 22 are valid. The others are invalid for this device's socket setup.
+starting from NETLINK_PROTOCOL_FAMILY_MIN to NETLINK_PROTOCOL_FAMILY_MAX are valid.
+The NETLINK_PROTOCOL_FAMILY_RESET_VALUE is for uninitialized protocol family.
+The others are invalid for this device's socket setup.
 
 #### *iccom_dev*
 
@@ -625,16 +627,16 @@ In order to be possible to test the sending and receiving of messages between
 the `Iccom sockets if` layer and the others below, there's the need of having
 an associated `Iccom` device.
 Furthermore, the **iccom_dev** attributes makes possible the association of an
-existing `Iccom` device and to bind it to the respective `Iccom sockets if` 
+existing `Iccom` device and to bind it to the respective `Iccom sockets if`
 device.
 
 	echo iccom.X > /sys/devices/platform/iccom_socket_if.Y/iccom_dev
 
-As soon as this attribute is affected (as shown above), the `Iccom` device is 
+As soon as this attribute is affected (as shown above), the `Iccom` device is
 binded to the indicated `Iccom sockets if` device, the associated netlink socket
-is created and initialized and the underlaying protocol is initialized, as well 
+is created and initialized and the underlaying protocol is initialized, as well
 as the callbacks that will handle data comming from both upper and lower layers.
 On the other hand, it is also possible to read this attribute so that one can
 perceive if the `Iccom sockets if` device has a `Iccom` device already associated.
-If so, the respective associated `Iccom` device name will be retrieved to the 
+If so, the respective associated `Iccom` device name will be retrieved to the
 user space console.
