@@ -18,7 +18,8 @@ default:
 	$(MAKE) -C ${KDIR_LOCAL} M=$$PWD \
 		CONFIG_BOSCH_ICCOM=m \
 		CONFIG_ICCOM_VERSION=$(git rev-parse HEAD) \
-		CONFIG_BOSCH_FD_TEST_TRANSPORT=m
+		CONFIG_BOSCH_FD_TEST_TRANSPORT=m \
+		CONFIG_BOSCH_ICCOM_SOCKETS=m
 
 # Cleans ICCom & Full Duplex Test Transport Test Build
 clean:
