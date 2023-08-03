@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.3-labs
-
 # NOTE: Default build for the iccom modules
 #       with its different variants
 FROM bosch-linux-full-duplex-interface:latest AS iccom

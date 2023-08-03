@@ -180,7 +180,7 @@ its repo:
 There are no transport hardware requirements for the ICCom.
 The transport hardware is totally abstracted by the transport
 layer, see:
-[Full-Duplex Symmetrical Interface](https://github.com/Bosch-SW/linux-full-duplex-interface).
+[Full-Duplex Symmetrical Interface] (https://github.com/Bosch-SW/linux-full-duplex-interface).
 
 RAM requirements are configurable: ICCom keeps all messages
 which were not yet consumed by the consumer layers (internal
