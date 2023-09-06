@@ -30,8 +30,6 @@
 #include <linux/version.h>
 #include <linux/platform_device.h>
 #include <linux/of_device.h>
-#include <stddef.h>
-
 
 #include <linux/iccom.h>
 

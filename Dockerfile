@@ -140,8 +140,8 @@ RUN grep "${ICCOM_SK_TEST_NAME}_protocol_family_24_1.python: PASS" /qemu_run_x86
 
 # Create the dtb file
 RUN mkdir -p /builds/linux_arm/device_tree
-COPY ./device_tree/versatile-pb_iccom.dts /builds/linux_arm/device_tree
-RUN dtc -I dts -O dtb /builds/linux_arm/device_tree/versatile-pb_iccom.dts > /builds/linux_arm/device_tree/versatile-pb_iccom.dtb
+COPY ./device_tree/ast2500.dts /builds/linux_arm/device_tree
+RUN dtc -I dts -O dtb /builds/linux_arm/device_tree/ast2500.dts > /builds/linux_arm/device_tree/ast2500.dtb
 
 # Add shell Test
 RUN mkdir -p /builds/shell-tests
@@ -153,7 +153,7 @@ RUN mkdir -p /builds/shell-tests
 COPY test/iccom_test.sh /builds/shell-tests
 RUN shell-to-initramfs-arm /builds/shell-tests/iccom_test.sh
 
-RUN run-qemu-tests-arm /builds/linux_arm/device_tree/versatile-pb_iccom.dtb
+RUN run-qemu-tests-arm /builds/linux_arm/device_tree/ast2500.dtb
 
 # Check the expected results
 RUN grep "${ICCOM_TEST_NAME}_0.shell.tests: PASS" /qemu_run_arm.log
