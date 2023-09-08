@@ -485,7 +485,7 @@ static int __iccom_skif_dispatch_msg_up(
 	if (data_size_bytes > ICCOM_SKIF_MAX_MESSAGE_SIZE_BYTES) {
 		iccom_skif_err("received message is bigger than max"
 				"  allowed: %lu > %d bytes; dropping;"
-				, data_size_bytes
+				, (unsigned long)data_size_bytes
 				, ICCOM_SKIF_MAX_MESSAGE_SIZE_BYTES);
 		return -ENOMEM;
 	}
@@ -498,7 +498,7 @@ static int __iccom_skif_dispatch_msg_up(
 	if (IS_ERR_OR_NULL(sk_buffer)) {
 		iccom_skif_err("could not allocate socket buffer,"
 					" req. size: %lu"
-					, NLMSG_SPACE(data_size_bytes));
+					, (unsigned long)NLMSG_SPACE(data_size_bytes));
 		return -EPIPE;
 	}
 
