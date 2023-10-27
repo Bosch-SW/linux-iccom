@@ -2,8 +2,8 @@
 # version, but leave opportunity to update it.
 KVER_DOCKER ?= v5.4
 
-KVER_LOCAL?= $(shell uname -r)
-KDIR_LOCAL ?= /lib/modules/$(KVER_LOCAL)/build
+KVER?= $(shell uname -r)
+KDIR ?= /lib/modules/$(KVER)/build
 
 # NOTE: don't change this unless you're sure what you're doing
 #	cause by this tag the dependent components refer to the current
@@ -25,7 +25,7 @@ endef
 
 # Creates the ICCom & Full Duplex Test Transport Test Build
 default:
-	$(MAKE) -C ${KDIR_LOCAL} M=$$PWD \
+	$(MAKE) -C ${KDIR} M=$$PWD \
 		CONFIG_BOSCH_ICCOM=m \
 		CONFIG_ICCOM_VERSION=$(git rev-parse HEAD) \
 		CONFIG_BOSCH_FD_TEST_TRANSPORT=m \
@@ -33,19 +33,19 @@ default:
 
 # Cleans ICCom & Full Duplex Test Transport Test Build
 clean:
-	$(MAKE) -C ${KDIR_LOCAL} M=$$PWD clean
+	$(MAKE) -C ${KDIR} M=$$PWD clean
 
 # Install to current machine
 install:
-	$(MAKE) -C $(KDIR_LOCAL) M=$$PWD modules_install
+	$(MAKE) -C $(KDIR) M=$$PWD modules_install
 	cp $$PWD/include/linux/iccom.h \
-		/usr/src/linux-headers-${KVER_LOCAL}/include/linux/iccom.h
+		/usr/src/linux-headers-${KVER}/include/linux/iccom.h
 
 # Try to remove the installed driver from current machine
 uninstall:
-	rm -f /usr/src/linux-headers-${KVER_LOCAL}/include/linux/iccom.h
-	rm -f /lib/modules/${KVER_LOCAL}/extra/src/iccom.ko
-	rm -f /lib/modules/${KVER_LOCAL}/extra/src/fd_test_transport.ko
+	rm -f /usr/src/linux-headers-${KVER}/include/linux/iccom.h
+	rm -f /lib/modules/${KVER}/extra/src/iccom.ko
+	rm -f /lib/modules/${KVER}/extra/src/fd_test_transport.ko
 
 # Build Docker deployed image (Docker image with built and installed ICCom)
 
