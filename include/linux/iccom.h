@@ -37,9 +37,15 @@
 // transport layer failed
 #define ICCOM_ERROR_TRANSPORT 2
 
-
 // size of data xfer in bytes
-#define ICCOM_DATA_XFER_SIZE_BYTES 64
+#ifndef ICCOM_DEFAULT_DATA_XFER_SIZE_BYTES
+        // the default is 64 bytes (works OK with such transports
+        // as SPI and shared memory, with adequate latency)
+        //
+        // NOTE: for bulky xfers one may want a bigger data xfer sizes.
+        #define ICCOM_DEFAULT_DATA_XFER_SIZE_BYTES 64
+#endif
+
 // size of data acknoledgement xfer in bytes
 #define ICCOM_ACK_XFER_SIZE_BYTES 1
 

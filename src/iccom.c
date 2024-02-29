@@ -277,12 +277,6 @@
 // should be > 0
 #define ICCOM_INITIAL_PACKAGE_ID 1
 
-#if ICCOM_DATA_XFER_SIZE_BYTES > ICCOM_ACK_XFER_SIZE_BYTES
-#define ICCOM_BUFFER_SIZE ICCOM_DATA_XFER_SIZE_BYTES
-#else
-#define ICCOM_BUFFER_SIZE ICCOM_ACK_XFER_SIZE_BYTES
-#endif
-
 /* --------------------- DATA PACKAGE CONFIGURATION ---------------------*/
 
 // unused payload space filled with this value
@@ -3361,7 +3355,7 @@ static int __iccom_enqueue_new_tx_data_package(struct iccom_dev *iccom)
 	}
 
 	int res = __iccom_package_init(new_package
-				       , ICCOM_DATA_XFER_SIZE_BYTES);
+				       , ICCOM_DEFAULT_DATA_XFER_SIZE_BYTES);
 	if (res < 0) {
 		iccom_err("no memory for new package");
 		kfree(new_package);

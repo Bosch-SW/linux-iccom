@@ -120,3 +120,25 @@ config BOSCH_ICCOM_TRANSPORT_MIRROR_V1
         Adds the ICCom protocol which is mirrored at the byte
         transport full-duplex layer. This can be useful for testing
         the ICCom protocol driver itself.
+
+config BOSCH_ICCOM_ICCOM_DEFAULT_DATA_XFER_SIZE
+    int "The default size (in bytes) of ICCom data xfer."
+    depends on BOSCH_ICCOM
+    default 64
+    range 20 1024
+    ---help---
+        Tells the ICCom to use given size for the data packages.
+        As usual: the smaller the size the faster package will be
+        assembled and sent, but at the same time smaller package
+        sizes lead to higher overhead for headers transmissions.
+        Default value is seen as an apropriate automotive data
+        transmission balance with many small data blocks to be delivered
+        with low latency. Note, the values smaller than 20 do not
+        really make any sense, due to the size of the headers
+        (approximately 11 bytes for joint package header, 1 packet header
+        and crc32 sum), which would make only 9 payload bytes for each
+        data xfer in this case. Making it even smaller really does not
+        make any sense. Making it bigger than 1K also doesn't really make
+        sense cause ICCom is not zero-copy transport, which mostly
+        dedicated to the small messages where no-copy mechanics brings
+        little benefit.
