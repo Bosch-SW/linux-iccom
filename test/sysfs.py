@@ -6,9 +6,6 @@ import os
 import string
 import random
 
-def execute_command(command):
-    subprocess.run(command, shell=True)
-
 # Read a sysfs file and handle expectations
 # within the function by raising errors when errors
 # are found or expectations are mismatched
@@ -58,10 +55,13 @@ def write_sysfs_file(file, content_to_write, err_expectation):
             file.write(content_to_write)
     except OSError as e:
         if err_expectation == None:
-            raise RuntimeError("Sysfs write file unexpected error \n"
-                               "    (file) %s \n"
-                               "    (error) %s \n"
-                               % (file, e.errno))
+            raise RuntimeError(
+                    ("Sysfs write file unexpected error \n"
+                    "    (file) %s \n"
+                    "    (error) %s "
+                    + ("(ENOENT: no such file or dir)" if e.errno == 2 else "")
+                    + "\n")
+                    % (file, e.errno))
         else:
             if (e.errno != err_expectation):
                 raise RuntimeError("Sysfs write file expectation mismatch\n"

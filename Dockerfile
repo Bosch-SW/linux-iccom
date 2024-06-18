@@ -89,52 +89,49 @@ FROM iccom AS iccom-test
 # Taking our test module and building it
 #
 
-ARG ICCOM_TEST_NAME="iccom_test"
-ARG ICCOM_SK_TEST_NAME="iccom_sk_test"
-
 # x86
 
-# Add Python Test
-COPY test/iccom_common.py /builds/python-test/
-# Binarization and blobing of the test script into initramfs
-RUN python-to-initramfs-x86 /builds/python-test/iccom_common.py
+COPY test/sysfs.py /builds/python-test/
+RUN python-to-initramfs-x86 /builds/python-test/sysfs.py
 
-# Add Python Test
+COPY test/general_test.py /builds/python-test/
+RUN python-to-initramfs-x86 /builds/python-test/general_test.py
+
+COPY test/iccom.py /builds/python-test/
+RUN python-to-initramfs-x86 /builds/python-test/iccom.py
+
+COPY test/iccom_skif.py /builds/python-test/
+RUN python-to-initramfs-x86 /builds/python-test/iccom_skif.py
+
+COPY test/iccom_testenv.py /builds/python-test/
+RUN python-to-initramfs-x86 /builds/python-test/iccom_testenv.py
+
 COPY test/iccom_test.py /builds/python-test/
-# Binarization and blobing of the test script into initramfs
 RUN python-to-initramfs-x86 /builds/python-test/iccom_test.py
 
-# Add Python Test
-COPY test/iccom_sk_test.py /builds/python-test/
-# Binarization and blobing of the test script into initramfs
-RUN python-to-initramfs-x86 /builds/python-test/iccom_sk_test.py
+COPY test/iccom_skif_test.py /builds/python-test/
+RUN python-to-initramfs-x86 /builds/python-test/iccom_skif_test.py
 
-
-# Add Python Test
 COPY test/iccom_main.py /builds/python-test/
-# Binarization and blobing of the test script into initramfs
 RUN python-to-initramfs-x86 /builds/python-test/iccom_main.py
 
+# Cleanup excessive files to fit into RAM
+#ENV INITRAMFS_CHROOT_X86="/builds/initramfs_x86/content"
+RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/sysfs/lib-dynload"
+RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/general_test/lib-dynload"
+RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom/lib-dynload"
+RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom_skif/lib-dynload"
+RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom_testenv/lib-dynload"
+RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom_test/lib-dynload"
+RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom_skif_test/lib-dynload"
 
 RUN run-qemu-tests-x86
 
 # Check the expected results
 
 # ICCOM
-RUN grep "${ICCOM_TEST_NAME}_0.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_TEST_NAME}_1.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_TEST_NAME}_2.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_TEST_NAME}_3.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_TEST_NAME}_4.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_TEST_NAME}_5.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_TEST_NAME}_6.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_TEST_NAME}_final_1.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_TEST_NAME}_final_2.python: PASS" /qemu_run_x86.log
-
-# ICCOM SK
-RUN grep "${ICCOM_SK_TEST_NAME}_protocol_family_22_1.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_SK_TEST_NAME}_protocol_family_23_1.python: PASS" /qemu_run_x86.log
-RUN grep "${ICCOM_SK_TEST_NAME}_protocol_family_24_1.python: PASS" /qemu_run_x86.log
+RUN grep "iccom_skif: PASS" /qemu_run_x86.log
+RUN grep "iccom: PASS" /qemu_run_x86.log
 
 # ARM
 
@@ -156,4 +153,4 @@ RUN shell-to-initramfs-arm /builds/shell-tests/iccom_test.sh
 RUN run-qemu-tests-arm /builds/linux_arm/device_tree/ast2500.dtb
 
 # Check the expected results
-RUN grep "${ICCOM_TEST_NAME}_0.shell.tests: PASS" /qemu_run_arm.log
+RUN grep "iccom_test_0.shell.tests: PASS" /qemu_run_arm.log

@@ -640,3 +640,179 @@ On the other hand, it is also possible to read this attribute so that one can
 perceive if the `Iccom sockets if` device has a `Iccom` device already associated.
 If so, the respective associated `Iccom` device name will be retrieved to the
 user space console.
+
+## Advanced routing
+
+The ICComSkif driver allows one to configure the advanced routing of all the
+messages which are streamed via ICComSkif driver.
+
+In very short words each incoming message can be sent to 0, 1 or more outgoing
+channels.
+
+Each incoming message is subjected to routing rule (if one is defined for this
+incoming channel and initial message direction). The rule in general can have
+multiple destinations defined (any channel and any direction). See the following
+picture for illustration:
+
+![ICCom Skif routing layout](docs/assets/iccom-skif-routing-general-layout.png)
+
+The behaviour is conrolled by the Routing Table File (RTF) under the ICComSkif
+device: `/sys/devices/platform/YOUR_ICCOM_SKIF_DEV/routing_table`.
+Example: `/sys/devices/platform/iccom_socket_if.12/routing_table`.
+
+If one reads from the RTF one gets the currently active routing table.
+If one writes to the RTF one sets new/updates active routing table.
+
+### Routing table format
+
+For those who don't like to parse the parsing algorithms from readme, there
+is an Examples section below, feel free to jump directly there.
+
+**NOTE:** `${X}` means "contents of `X`"
+
+**NOTE:** input format is a sequence of commands. Commands are separated with
+semicolons. All whitespaces (including newlines) are ignored. Each command
+must end with semicolon (including the last one).
+
+* `<GLOBAL_COMMANDS_LIST>`:  `${CMD};${CMD};....${CMD};`
+  OPTIONAL SEMICOLON SEPARATED LIST of global commands. Available
+  commands are:
+  * `+`:  
+    when given, then the incoming data will be appended to existing table
+  * `-`:  
+    will drop the routing and switch IccomSkif into classic mode (all
+    channels are allowed pass-through + loopback configuration).
+  * `x`:  
+    set default action for all channels and directions to `allow`, meaning that
+    if channel is not mentioned explicitly in routing table, then the message
+    will just continue as it goes: same channel, same direction.  
+
+  EXAMPLE:  
+  * `+; <some rules here>`:  
+    will append the rules defined after `+` command to the existing routing table.
+
+  EXAMPLE:  
+	* ` -;\n`:  
+    will drop the routing and switch to the classic mode.
+		**NOTE:** all whitespaces including newlines are ignored.
+
+  EXAMPLE:  
+	* ` x;  \n`:
+    will set the default action to `allow` for all messages.
+		**NOTE:** all whitespaces including newlines are ignored.
+
+* `<RULES_COMMANDS_LIST>`: `${RULE};${RULE};...${RULE};`  
+  OPTIONAL SEMICOLON SEPARATED LIST of rules. All whitespaces including
+  newlines are ignored.
+
+  Each RULE is the string of following format:
+  * `${INCOMING_CHANNEL_NUMBER}${INCOMING_DIR}${ACTION}...${ACTION}`  
+    where:
+    * `INCOMING_CHANNEL_NUMBER`:  
+      is positive decimal integer describing original message channel.  
+      EXAMPLE:  
+      * `1234`
+    * `INCOMING_DIR`:  
+      is original message direction: either `u` for UPWARD direction
+      (from transport driver to User Space), OR `d` for DOWNWARD direction
+      (from US to transport driver)  
+      EXAMPLE:
+      * `u`
+    * `ACTION`:  
+      is either `x` for default action, or a string of following
+      format: `${DST_CHANNEL}${DST_DIRECTION}`, where
+      * `DST_CHANNEL`:  
+        is the channel number to send the msg  
+        EXAMPLE:
+        * `421`
+      * `DST_DIRECTION`:  
+        is the destination direction to send the msg (`u` or `d`):  
+        EXAMPLE:
+        * `d`
+
+Below you will find the routing table examples.
+
+### Routing table examples
+
+Here are some full examples.
+
+First some visual examples (those who love textual format see section below).
+
+Here the example of a rule for multicasting a message coming from transport layer
+toward user space:
+
+![ICCom Skif routing example 1](docs/assets/iccom-skif-routing-upward-multicast-example.png)
+
+Here the example of a rule for multicasting a message coming from transport layer
+toward user space and gets multicasted to 2 channels toward user space and
+also to one channel toward transport:
+
+![ICCom Skif routing example 2](docs/assets/iccom-skif-routing-upward-and-downward-multicast-example-from-below.png)
+
+Example similar to one above, but just message originates from user space:
+
+![ICCom Skif routing example 3](docs/assets/iccom-skif-routing-upward-and-downward-multicast-example-from-above.png)
+
+And here are the promised textual examples:
+
+**NOTE:** all whitespaces including newlines are ignored.
+
+* ` - ;\n`
+  same as next example,
+* `-;`
+  disable routing, switch to classical mode,
+* `123ux;\n`
+  One rule:
+  * messages incoming via ch `123` `UPWARDS` will be subjected
+    to default action (continue upwards the same channel),
+    all other channels and directions are blocked.
+* `123u 24u 351u 1000d x;`
+  same as next example:
+* ` 123u 24u 351u 1000d x;  \n\n`
+  same as next example:
+* `123u24u351u1000dx;`
+  One rule:
+  * messages incoming via ch `123` `UPWARDS` will be sent to
+    * channel `24` `upwards`,
+    * channel `351` `upwards`,
+    * channel `1000` `downwards`,
+    * channel `123` `upwards` (default action, stated as `x`),
+    all other channels and directions are blocked.
+* `123ux;`
+	`123dx;`
+  **NOTE:** newlines are inserted only for human readability,
+  driver will ignore them.
+  Two rules:
+  * messages on ch `123` will continue as they go
+    (so 123 channel is bidirectional IO),
+  all other channels are blocked.
+
+* `123ux;`
+	`123dx;`
+	`3411ux;`
+	`5522dx;`
+  4 rules:
+  * messages on ch `123` will continue as they go
+    (so 123 channel is bidirectional IO),
+  * channel `3411` is readonly for US,
+  * channel `5522` is writeonly for US,
+  all other channels are blocked.
+* `123ux1111u;`
+  `123dx1111u;`
+  `3411ux1111u;`
+  `5522dx1111u;`
+  4 rules:
+  * messages on ch `123` will continue as they go
+    (so 123 channel is bidirectional IO),
+  * channel `3411` is readonly for US,
+  * channel `5522` is writeonly for US,
+  * copy of all non-blocked messages will be delivered to channel `1111` toward US,
+  all other channels are blocked.
+* `x;22d;33u;55u55u66u;`
+  * `x` sets default action to `allow`
+  * channel `22` downward direction is blocked (channel is readonly for US),
+  * channel `33` upward direction is blocked (channel is writeonly for US),
+  * channel `55` upward messages will continue toward channel `55` in US, and
+    also will be multicasted to the channel `66` in US. Writing to this channel
+    from US side is OK, cause all non-mentioned pairs or channel+direction are
+    allowed by default in `x` mode.

@@ -586,9 +586,11 @@ int fd_tt_close(void __kernel *device)
 	FD_TT_CHECK_FULL_DUPLEX_DEVICE("", return -ENODEV);
 	FD_TT_CHECK_XFER_DEVICE("", return -EFAULT);
 	FD_TT_FULL_DUPLEX_DEVICE_TO_XFER_DEVICE();
+
 	xfer_device->finishing = true;
 	xfer_device->running = false;
 	fd_tt_xfer_free(&xfer_device->xfer);
+
 	return 0;
 }
 
@@ -621,26 +623,6 @@ int fd_tt_reset(
 }
 
 /* ------------- FULL DUPLEX TEST TRANSPORT DEVICE ------------- */
-
-// Check whether the transport device has link
-// dependencies to an upper layer (iccom device)
-//
-// @fd_test_transport {valid ptr} transport device to be checked
-//
-// RETURNS:
-//      0: No dependent device
-//   != 0: There is a dependent device
-ssize_t fd_tt_check_link_dependency(struct device *fd_test_transport)
-{
-	FD_TT_CHECK_PTR(fd_test_transport, return -EFAULT)
-
-	if (list_empty(&fd_test_transport->links.suppliers)) {
-		fd_tt_err("There is an dependent device for this "
-				"transport device.");
-		return -EINVAL;
-	}
-	return 0;
-}
 
 // Trim a sysfs input buffer coming from userspace
 // wich might have unwanted characters
@@ -912,8 +894,10 @@ static ssize_t transport_RW_store(
 					hex_buffer_size,
 					wire_data, wire_data_size);
 
+#if FD_TT_VERBOSITY >= 5
 	print_hex_dump(KERN_INFO, FD_TT_LOG_PREFIX"Sim RX data: ", 0, 16
 			, 1, wire_data, xfer_size, true);
+#endif
 
 	if (xfer_size <= 0) {
 		fd_tt_warning("transport Device Decoding failed for str: %s"
@@ -1122,12 +1106,6 @@ static ssize_t delete_transport_store(
 	if (IS_ERR_OR_NULL(platform_device)) {
 		fd_tt_err("Full Duplex Test Transport device is null.");
 		return -EFAULT;
-	}
-
-	ssize_t link_dependency = fd_tt_check_link_dependency(
-						platform_device);
-	if (link_dependency != 0) {
-		return link_dependency;
 	}
 
 	platform_device_unregister(to_platform_device(platform_device));

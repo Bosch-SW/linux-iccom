@@ -30,6 +30,7 @@
 #include <linux/version.h>
 #include <linux/platform_device.h>
 #include <linux/of_device.h>
+#include <linux/hashtable.h>
 
 #include <linux/iccom.h>
 
@@ -86,6 +87,16 @@
 // The default/reset value for the netlink iccom socket protocol family. It
 // identifies whether or not the socket family has been properly initialized.
 #define NETLINK_PROTOCOL_FAMILY_RESET_VALUE -1
+
+// Defines how many extra actions can be handled by the routing rule.
+#define ICCOM_SKIF_ROUTING_MAX_ACTIONS 10
+// Defines number of buckets in bits (9 -> 2 ^ 9 = 512 buckets)
+#define ICCOM_SKIF_ROUTING_HASH_SIZE_BITS 9
+// Defines the message direction:
+//	"down": originates from US.
+//	"up": originates from underlying ICCom transport.
+#define ICCOM_SKIF_DIR_DOWN false
+#define ICCOM_SKIF_DIR_UP true
 
 #define ICCOM_SKIF_CLOSE_POLL_PERIOD_JIFFIES msecs_to_jiffies(200)
 
@@ -192,6 +203,62 @@ struct iccom_skif_loopback_mapping_rule {
 	int shift;
 };
 
+
+// Describes a single action for the message being processed.
+// NOTE: no-action registered for the channel 
+// NOTE: DO NOT PACK!
+struct iccom_skif_routing_action {
+	int dst_channel;
+	bool direction;
+};
+
+
+// Single rule describing the actions to be taken 
+//
+// NOTE: keep it in a way that zeroing the memory (except for the
+//		list anchor member) would lead to valid object.
+//
+// @hash_list_anchor exactly this.
+// @incoming_channel the channel number to which the rule should
+//	be applied
+// @initial_direction the initial direction of a message
+//	this rule should be applied to:
+//		0 - down (From user space to kernel)
+//		1 - up (from kernel to user space)
+// @use_default_action to use the default action or not.
+// @custom_acts array of custom actions to perform on target,
+//		its actual size given by @custom_acts_size
+// @custom_acts_size tracks the actual size of the @custom_acts array.
+struct iccom_skif_routing_rule {
+	struct hlist_node hash_list_anchor;
+
+	int incoming_channel;
+	bool initial_direction;
+
+	bool use_default_action;	
+
+	struct iccom_skif_routing_action custom_acts[ICCOM_SKIF_ROUTING_MAX_ACTIONS];
+	size_t custom_acts_size;
+};
+
+// Contains full routing information for the IccomSkif.
+// @rules the hash table for all routing rules.
+//		HASH KEY:
+//			provided by hash function @__iccom_skif_routing_hkey.
+//		NOTE: we're not working with per-element RCU handling for one
+//			main reason - the routing table shall not be available in
+//			transient states (per-element RCU operation leaves room
+//			for transient states to be available to readers, when, say
+//			half or routing table is old and half is already new).
+// @allowed_by_default if set to true, then the default routing action
+//		is "allow to pass". If set to false then the default routing
+//		action is "block".
+//		NOTE: by default set to false.
+struct iccom_skif_routing {
+	DECLARE_HASHTABLE(rules, ICCOM_SKIF_ROUTING_HASH_SIZE_BITS);
+	bool allowed_by_default;
+};
+
 // ICCom socket interface provider.
 //
 // @socket the socket we are working with
@@ -217,6 +284,10 @@ struct iccom_skif_loopback_mapping_rule {
 //      added.
 // @lback_map_rule the channel loopback mapping rule pointer,
 //      allocated on heap.
+// @routing the routing rules hash table pointer, is used when routing
+//		is enabled to determine what actions shall be taken for
+//		this or that incoming message.
+//		NOTE: if NULL: routing is disabled
 struct iccom_sockets_device {
 	struct sock *socket;
 	int protocol_family_id;
@@ -230,6 +301,7 @@ struct iccom_sockets_device {
 	struct completion socket_closed;
 
 	struct iccom_skif_loopback_mapping_rule *lback_map_rule;
+	struct iccom_skif_routing __rcu *routing;
 };
 
 /* -------------------------- EXTERN VARS -------------------------------*/
@@ -245,12 +317,17 @@ struct ida iccom_skif_dev_id;
 
 static int __iccom_skif_dispatch_msg_up(
 		struct iccom_sockets_device *iccom_sk
-		, const uint32_t channel, const void *const data
-		, const size_t data_size_bytes);
+		, const uint32_t dst_channel
+		, const void *const data
+		, const size_t data_size_bytes
+		, const int priority);
 
-static int __iccom_skif_dispatch_msg_down(
+inline int __iccom_skif_dispatch_msg_down(
 		struct iccom_sockets_device *iccom_sk
-		, struct sk_buff *sk_buffer);
+		, const uint32_t dst_channel
+		, const void *const data
+		, const size_t data_size_bytes
+		, const int priority);
 
 static int __iccom_skif_match_channel2lbackrule(
 	const struct iccom_skif_loopback_mapping_rule *const rule
@@ -258,32 +335,45 @@ static int __iccom_skif_match_channel2lbackrule(
 
 static void __iccom_skif_netlink_data_ready(struct sk_buff *skb);
 
+static int __iccom_skif_route_msg(
+		struct iccom_sockets_device *iccom_sk
+		, const uint32_t in_channel
+		, const bool in_dir
+		, const void *const data
+		, const size_t data_size_bytes
+		, const int priority);
+
 /* --------------------- ENTRY POINTS -----------------------------------*/
 
 // Searches the iccom socket device that shall transmit the msg
-// received from userspace down to the corresponding iccom instance.
+// received from UserSpace down to the corresponding iccom instance.
 // The search is done by comparing the socket id from socket buffer
 // and iccom socket device socket id.
 //
+// NOTE: it doesn't own the message data.
+//
 // @dev {valid ptr} iccom socket device
-// @data {valid ptr} sk_buff with the socket data received
-//                   to be dispatched to the iccom device
-//                   associated with the iccom sk
+// @skb_ptr {valid ptr} struct sk_buff ptr with the socket data received
+//                   to be dispatched.
 //
 // RETURNS:
 //      ICCOM_SKIF_DEVICE_FOUND: Iccom sk device found hence msg dispatched.
-//      ICCOM_SKIF_DEVICE_NOT_FOUND: Iccom sk device not found hence msg not dispatched.
-//      ICCOM_SKIF_DEVICE_EXITING:  Iccom sk device found but exiting hence msg not dispatched.
+//      ICCOM_SKIF_DEVICE_NOT_FOUND: Iccom sk device not found hence msg
+//			not dispatched.
+//      ICCOM_SKIF_DEVICE_EXITING:  Iccom sk device found but exiting
+//			hence msg not dispatched.
 //     -EFAULT: pointers are null
-int __iccom_skif_select_device_for_dispatching_msg_down(struct device *dev, void* data)
+int __iccom_skif_handle_us_msg(struct device *dev, void *skb_ptr)
 {
+	struct sk_buff *skb = (struct sk_buff *)skb_ptr;
+
 	if (IS_ERR_OR_NULL(dev)) {
 		iccom_skif_err("device is null");
 		return -EFAULT;
 	}
 
-	if (IS_ERR_OR_NULL(data)) {
-		iccom_skif_err("data is null");
+	if (IS_ERR_OR_NULL(skb)) {
+		iccom_skif_err("skb ptr is null");
 		return -EFAULT;
 	}
 
@@ -294,8 +384,6 @@ int __iccom_skif_select_device_for_dispatching_msg_down(struct device *dev, void
 		iccom_skif_err("Invalid socket device.");
 		return -EFAULT;
 	}
-
-	struct sk_buff *skb = (struct sk_buff *)data;
 
 	if (skb->sk != iccom_sk->socket) {
 		iccom_skif_info("Iccom socket device socket is different than the "
@@ -308,7 +396,26 @@ int __iccom_skif_select_device_for_dispatching_msg_down(struct device *dev, void
 		return ICCOM_SKIF_DEVICE_EXITING;
 	}
 
-	__iccom_skif_dispatch_msg_down(iccom_sk, skb);
+	struct nlmsghdr *nl_header = (struct nlmsghdr *)skb->data;
+	// TODO: use bitfields here
+	uint32_t channel = NETLINK_CB(skb).portid & 0x00007FFF;
+	// TODO: use bitfields here
+	uint32_t priority = ((uint32_t)nl_header->nlmsg_type) >> 8;
+
+	if (!NLMSG_OK(nl_header, skb->len)) {
+		iccom_skif_warning("Broken netlink message rq to be sent:"
+					" socket id: %d; ignored;"
+					, channel);
+		return -EINVAL;
+	}
+
+	__iccom_skif_route_msg(
+			iccom_sk
+			, channel
+			, ICCOM_SKIF_DIR_DOWN
+			, NLMSG_DATA(nl_header)
+			, NLMSG_PAYLOAD(nl_header, 0)
+			, priority);
 
 	return ICCOM_SKIF_DEVICE_FOUND;
 }
@@ -325,22 +432,31 @@ static bool __iccom_skif_msg_rx_callback(
 
 	ICCOM_SKIF_CHECK_DEVICE("", return false);
 
-	const int lback = __iccom_skif_match_channel2lbackrule(
-				iccom_sk->lback_map_rule, channel);
-	// loopback mode for this channel was enabled, so external
-	// party is dropped from the loop channel
-	if (lback != 0) {
-		return false;
-	}
-
-	__iccom_skif_dispatch_msg_up(iccom_sk, channel, msg_data
-					, msg_len);
+	__iccom_skif_route_msg(iccom_sk
+			, channel
+			, ICCOM_SKIF_DIR_UP
+			, msg_data
+			, msg_len
+			, 0);
 
 	// we will not take ownership over the msg_data
 	return false;
 }
 
 /* --------------------- GENERAL SECTION --------------------------------*/
+
+// Helper. Generates hash key for given channel and original message
+// direction.
+// @channel incoming message incoming channel #
+// @direction incoming message original direction
+//		0 - down,
+//		1 - up
+inline int __iccom_skif_routing_hkey(const uint32_t channel
+				, const bool direction)
+{
+	// just set the top bit to the direction.
+	return channel | ((direction ? 1 : 0) << 31);
+}
 
 // Helper. Shows the relationship between loopback loop and the channel
 //      number.
@@ -409,6 +525,157 @@ static int __iccom_skif_lback_rule_verify(
 	return 0;
 }
 
+// @rules_hash array of hash buckets.
+// @hash_size_bits the number of hash buckets (buckets count: 2^hash_size_bits)
+// @in_channel the incoming message channel.
+// @in_dir the incoming message initial direction, 1 - up, 0 - down.
+//
+// RETURNS: pointer to the matching rule, if rule matches given
+//		filter data. If no rule matches: NULL.
+//
+// THREADING: no locking, no checks, no RCU locking, nothing:
+//		caller MUST care.
+inline struct iccom_skif_routing_rule *__iccom_skif_match_rule(
+		struct hlist_head *rules_hash
+		, int hash_size_bits, int in_channel, bool in_dir)
+{
+	const int hkey = __iccom_skif_routing_hkey(in_channel, in_dir);
+
+	struct hlist_head *rth_head = &(rules_hash[hash_min(hkey, hash_size_bits)]);
+
+	struct iccom_skif_routing_rule *rule;
+
+	hlist_for_each_entry(rule, rth_head, hash_list_anchor)	{
+		if (rule->incoming_channel == in_channel
+				&& rule->initial_direction == in_dir) {
+			return rule;
+		}
+	}
+	return NULL;
+}
+
+// Processes the message according to the current routing configuration.
+// If routing is enabled follows the routing rules provided by userland.
+// If routing is disabled then only classical loopback functionality is
+// available.
+// NOTE: so, either routing is enabled OR loopback (not together).
+//
+// @in_channel the channel via which message arrived
+// @in_dir the initial direction of the incoming message
+//		0 - down
+//		1 - up
+// @data the message data ptr
+// @data_size_bytes size of the @data in bytes
+// @priority the message priority (not used for now)
+//
+// RETURNS:
+//      0: success
+//      <0: negated error code, if fails
+static int __iccom_skif_route_msg(
+		struct iccom_sockets_device *iccom_sk
+		, const uint32_t in_channel
+		, const bool in_dir
+		, const void *const data
+		, const size_t data_size_bytes
+		, const int priority)
+{
+	// classical path (no-routing, only loopback available)
+	if (IS_ERR_OR_NULL(iccom_sk->routing)) {
+		if (in_dir == ICCOM_SKIF_DIR_UP) {
+			const int lback = __iccom_skif_match_channel2lbackrule(
+						iccom_sk->lback_map_rule, in_channel);
+			// loopback mode for this channel was enabled, so external
+			// party is dropped from the loop channel
+			if (lback != 0) {
+				return 0;
+			}
+
+			return __iccom_skif_dispatch_msg_up(
+						iccom_sk, in_channel, data, data_size_bytes
+						, priority);
+		} else if (in_dir == ICCOM_SKIF_DIR_DOWN) {
+			const int lback = __iccom_skif_match_channel2lbackrule(
+						iccom_sk->lback_map_rule, in_channel);
+			// loopback mode for this channel
+			if (lback != 0) {
+				const int shift = iccom_sk->lback_map_rule->shift;
+				const uint32_t dst_ch = (lback > 0) ? (in_channel + shift)
+									: (in_channel - shift);
+				return __iccom_skif_dispatch_msg_up(iccom_sk
+							, dst_ch, data, data_size_bytes, priority);
+			}
+
+			return __iccom_skif_dispatch_msg_down(iccom_sk
+							, in_channel, data, data_size_bytes, priority);
+		}
+		return 0;
+	}
+
+	struct iccom_skif_routing_rule *rule = NULL;
+
+	// NOTE: +1 for default action
+	typeof(rule->custom_acts[0]) acts[ARRAY_SIZE(rule->custom_acts) + 1];
+	size_t acts_size = 0;
+	bool use_default = false;
+
+	// Just getting the rule in RCU way.
+	// NOTE: we can not lock while we sending, cause send might block,
+	//		that is why we need a copy-on-stack of the actions.
+	rcu_read_lock();
+	struct iccom_skif_routing *rt = rcu_dereference(iccom_sk->routing);
+	if (!IS_ERR_OR_NULL(rt)) {
+		rule = __iccom_skif_match_rule(
+					rt->rules, ICCOM_SKIF_ROUTING_HASH_SIZE_BITS
+					, in_channel, in_dir);
+		if (!IS_ERR_OR_NULL(rule)) {
+			// The fastest way to copy.
+			// NOTE: we rely on routing action to be padded to alignment.
+			memcpy(&acts[0], &rule->custom_acts[0]
+				, sizeof(acts[0]) * rule->custom_acts_size);
+			acts_size = rule->custom_acts_size;
+			// NOTE: if channel is mentioned, then it will not be under
+			//	global default.
+			use_default = rule->use_default_action;
+		} else {
+			// NOTE: if channel is not mentioned, then it will be under
+			//	global default.
+			use_default = rt->allowed_by_default;
+		}
+	}
+	rcu_read_unlock();
+
+	if (use_default) {
+		struct iccom_skif_routing_action ra = {
+				.dst_channel= in_channel, .direction = in_dir };
+		acts[acts_size] = ra;
+		acts_size += 1;
+	}
+
+	// Executing the rule
+	for (int i = 0; i < acts_size; i++) {
+		if (acts[i].direction == ICCOM_SKIF_DIR_UP) {
+			__iccom_skif_dispatch_msg_up(
+						iccom_sk, acts[i].dst_channel, data, data_size_bytes
+						, priority);
+		} else if (acts[i].direction == ICCOM_SKIF_DIR_DOWN) {
+			__iccom_skif_dispatch_msg_down(
+						iccom_sk, acts[i].dst_channel, data, data_size_bytes
+						, priority);
+		}
+	}
+	return 0;
+}
+
+// Sends the message toward the underlying ICCom driver.
+//
+// @iccom_sk {valid iccom socket dev ptr}
+// @dsg_channel {valid channel number} target channel to send the msg.
+// @data {valid data ptr}
+// @data_size_bytes {size of data pointed by @data}
+// @priority the priority of the message (not used for now)
+//
+// NOTE: doesn't have ownership over the message data.
+//
 // The message header is used in following way:
 // * nlmsg_type -> the destination channel (port number)
 // * nlmsg_flags (lo byte) -> priority
@@ -417,70 +684,46 @@ static int __iccom_skif_lback_rule_verify(
 // RETURNS:
 //      0: success
 //      <0: negated error code, if fails
-static int __iccom_skif_dispatch_msg_down(
+inline int __iccom_skif_dispatch_msg_down(
 		struct iccom_sockets_device *iccom_sk
-		, struct sk_buff *sk_buffer)
+		, const uint32_t dst_channel
+		, const void *const data
+		, const size_t data_size_bytes
+		, const int priority)
 {
-	struct nlmsghdr *nl_header = (struct nlmsghdr *)sk_buffer->data;
-
-	// TODO: use bitfields here
-	uint32_t channel_nr = NETLINK_CB(sk_buffer).portid & 0x00007FFF;
-	// TODO: use bitfields here
-	uint32_t priority = ((uint32_t)nl_header->nlmsg_type) >> 8;
-
-	if (!NLMSG_OK(nl_header, sk_buffer->len)) {
-		iccom_skif_warning("Broken netlink message to be sent:"
-					" socket id: %d; ignored;"
-					, channel_nr);
-		return -EINVAL;
-	}
-
-	iccom_skif_dbg_raw("-> TX data from userspace (ch. %d):"
-				, channel_nr);
+	iccom_skif_dbg_raw("-> TX data (ch. %d):", dst_channel);
 #ifdef ICCOM_SKIF_DEBUG
 	print_hex_dump(KERN_DEBUG
-			, ICCOM_SKIF_LOG_PREFIX"US -> TX data: "
-			, 0, 16, 1, NLMSG_DATA(sk_buffer->data)
-			, NLMSG_PAYLOAD(nl_header, 0)
+			, ICCOM_SKIF_LOG_PREFIX"   -> TX data: "
+			, 0, 16, 1, NLMSG_DATA(data)
+			, data_size_bytes
 			, true);
 #endif
 
-	const int lback = __iccom_skif_match_channel2lbackrule(
-				iccom_sk->lback_map_rule, channel_nr);
-	// loopback mode for this channel
-	if (lback != 0) {
-		const int shift = iccom_sk->lback_map_rule->shift;
-		const uint32_t dst_ch = (lback > 0) ? (channel_nr + shift)
-							: (channel_nr - shift);
-		return __iccom_skif_dispatch_msg_up(iccom_sk
-				, dst_ch
-				, NLMSG_DATA(nl_header)
-				, NLMSG_PAYLOAD(nl_header, 0));
-	}
-
 	return iccom_post_message(iccom_sk->iccom
-			, NLMSG_DATA(nl_header)
-			, NLMSG_PAYLOAD(nl_header, 0)
-			, channel_nr
-			, priority);
+			, data, data_size_bytes, dst_channel, priority);
 }
 
-// Sends the given message data incoming from ICCom layer
-// up to the netlink socket and correspondingly to userspace
-// application behind it.
+// Sends the given message up to the netlink socket and correspondingly
+// to userspace application behind it.
+//
+// NOTE: does NOT take ownership over message data: just copies it.
 //
 // @iccom_sk {valid iccom socket dev ptr}
-// @channel {valid channel number}
+// @dsg_channel {valid channel number} target channel to send the msg.
 // @data {valid data ptr}
 // @data_size_bytes {size of data pointed by @data}
+// @priority the priority of the message (not used for now)
 //
 // RETURNS:
 //      0: success
 //      <0: negated error code, if fails
 static int __iccom_skif_dispatch_msg_up(
 		struct iccom_sockets_device *iccom_sk
-		, const uint32_t channel, const void *const data
-		, const size_t data_size_bytes)
+		, const uint32_t dst_channel
+		, const void *const data
+		, const size_t data_size_bytes
+		, const int priority)
 {
 	if (data_size_bytes > ICCOM_SKIF_MAX_MESSAGE_SIZE_BYTES) {
 		iccom_skif_err("received message is bigger than max"
@@ -489,7 +732,7 @@ static int __iccom_skif_dispatch_msg_up(
 				, ICCOM_SKIF_MAX_MESSAGE_SIZE_BYTES);
 		return -ENOMEM;
 	}
-	const uint32_t dst_port_id = channel;
+	const uint32_t dst_port_id = dst_channel;
 
 	//   TODO: reuse allocated memory if possible
 	struct sk_buff *sk_buffer = alloc_skb(NLMSG_SPACE(data_size_bytes),
@@ -520,6 +763,8 @@ static int __iccom_skif_dispatch_msg_up(
 			, 0, 16, 1, data, data_size_bytes, true);
 #endif
 
+	// NOTE: sending to the port == 0 (channel == 0), will lead to
+	//	us ourselves to receive the message back =)
 	int res = netlink_unicast(iccom_sk->socket, sk_buffer, dst_port_id
 					, MSG_DONTWAIT);
 
@@ -616,6 +861,613 @@ static ssize_t read_loopback_rule_show(struct device *dev,
 	return len;
 }
 static DEVICE_ATTR_RO(read_loopback_rule);
+
+// Frees resources related to the routing table and sets routing
+// object pointer to NULL.
+//
+// @rt {valid ptr to routing ptr} pointer to routing object pointer.
+//		NOTE: if pointer to the routing is NULL, then does nothing.
+//
+// THREADING:
+//		no protections on any concurrency. Caller is responsible
+//		to take care of it.
+void __iccom_skif_routing_free(struct iccom_skif_routing **rt)
+{
+	if (IS_ERR_OR_NULL(*rt)) {
+		return;
+	}
+
+	// clean up old routing table
+	int bucket;
+	struct iccom_skif_routing_rule *rule;
+	struct hlist_node *node;
+
+	hash_for_each_safe((*rt)->rules, bucket, node, rule, hash_list_anchor) {
+		hlist_del(&rule->hash_list_anchor);
+		kfree(rule);
+	}
+	kfree(*rt);
+	*rt = NULL;
+}
+
+// Drops the routing table, and thus switches the IccomSkif into
+// classical mode.
+//
+// THREADING: MUST NOT be called in concurrent way (caller has to ensure
+//    that no concurrent __iccom_skif_routing_drop(...) is carried out)
+//
+// @iccom_sk {valid ptr} the IccomSkif device.
+void __iccom_skif_routing_drop(struct iccom_sockets_device *iccom_sk)
+{
+	struct iccom_skif_routing *old_rt = rcu_dereference(iccom_sk->routing);
+	rcu_assign_pointer(iccom_sk->routing, NULL);
+	synchronize_rcu();
+	__iccom_skif_routing_free(&old_rt);
+	iccom_skif_info("Dropped routing table.");
+}
+
+// Appends routing table contents from routing table @from to
+// routing table @to.
+//
+// NOTE: for now just raw implementation without duplications check.
+// NOTE: copies the entries from @from to @to, doesn't move them, cause
+//    usually we want to have the original table intact, while we creating
+//    the next version of table.
+// NOTE: if fails, the @to might have partial data imported from @from.
+//
+// @from {NULL | valid ptr} the valid routing table to read contents from.
+//		NOTE: if NULL, then function just returns with success.
+// @to {valid ptr} the valid routing table to append the contents to.
+//      NOTE: the routing table must be initialized.
+//
+// RETURNS:
+//    0: on success,
+//    <0: negated error code on failure
+//
+// THREADING: 
+//		No locking / sync is used for @from neither for @to.
+//      Caller must ensure that @from is not altered in parallel, and
+//      that @to is not read / altered in parallel.
+int __iccom_skif_routing_table_append(
+	struct iccom_skif_routing *from
+	, struct iccom_skif_routing *to)
+{
+	if (!IS_ERR_OR_NULL(from)) {
+		return 0;
+	}
+
+	int bkt;
+	struct iccom_skif_routing_rule *rule = NULL;
+	hash_for_each(from->rules, bkt, rule, hash_list_anchor) {
+		struct iccom_skif_routing_rule *new_rule = kmalloc(sizeof(*new_rule), GFP_KERNEL);
+		if (IS_ERR_OR_NULL(new_rule)) {
+			iccom_skif_err("No memory for new routing table rule, sorry.");
+			return -ENOMEM;
+		}
+		*new_rule = *rule;
+		INIT_HLIST_NODE(&new_rule->hash_list_anchor);
+		hash_add(to->rules, &new_rule->hash_list_anchor
+					, __iccom_skif_routing_hkey(new_rule->incoming_channel
+												, new_rule->initial_direction));
+	}
+
+	return 0;
+}
+
+// Prints out the given rule into string buffer.
+// Guarantees that the buf will be a valid C-string.
+//
+// @rule {valid rule valid ptr | NULL}.
+//		If NULL then does nothing.
+// @buf {ptr to the buffer of size @size}
+// @size @buf size
+//
+// RETURNS: the number of chars written into the buffer not including
+//		the final \0 char.
+ssize_t __iccom_skif_print_rule(
+				struct iccom_skif_routing_rule *rule
+				, char *buf, ssize_t size)
+{
+	if (IS_ERR_OR_NULL(rule)) {
+		return 0;	
+	}
+
+	ssize_t count = 0;
+
+	// the incoming msg selector
+	count += scnprintf(buf + count, size - count, "%u%c", rule->incoming_channel
+					, rule->initial_direction ? 'u' : 'd');
+	
+	if (rule->use_default_action) {
+		count += scnprintf(buf + count, size - count, " x");
+	}
+
+	for (int i = 0; i < rule->custom_acts_size; i++) {
+		count += scnprintf(buf + count, size - count, " %u%c"
+					, rule->custom_acts[i].dst_channel
+					, rule->custom_acts[i].direction ? 'u' : 'd');
+	}
+
+	count += scnprintf(buf + count, size - count, ";");
+	return count;
+}
+
+// Parses the ONE rule from one-rule-describing C-string.
+//
+// NOTE: All whitespace (including \n) will be ignored.
+// NOTE: the rules are separated by ;
+//
+// NOTE: at the end of parsing the read cursor will be located at
+//    the first non-space char after the just-parsed-rule.
+//
+// @buf points to the beginning of the C-string to parse (must be
+//    null-terminated).
+//    NOTE: All whitespace (including \n) will be ignored.
+//	  NOTE: buf[count - 1] must be == 0.
+// @count the number of chars available in the buffer, including
+//    the \0 char at the end.
+// @out in case of success this pointer will be set to newly created
+//    rule, else will be set to NULL.
+//
+// RETURNS:
+//		0: nothing was parsed - faced EOF,
+//         in this case @out will be set to NULL.
+//		>0: number of chars successfully parced into a rule,
+//          in this case @out will point to the newly created rule.
+//		<0: error faced (negated value).
+//         in this case @out will be set to NULL.
+static ssize_t __iccom_skif_parse_rule(
+					const char *buf, size_t count
+					, struct iccom_skif_routing_rule **out)
+{
+	const size_t orig_count = count;
+
+	*out = NULL;
+	int ret = 0;
+
+	if (buf[count - 1] != 0) {
+		iccom_skif_err("C-string must be provided. 0 must be a buffer end.");
+		return -EINVAL;
+	}
+	if (count == 1) {
+		return 0;
+	}
+
+	struct iccom_skif_routing_rule *rule = kzalloc(sizeof(*rule), GFP_KERNEL);
+
+	if (IS_ERR_OR_NULL(rule)) {
+		iccom_skif_err("No memory for new rule, sorry.");
+		return -ENOMEM;
+	}
+
+	INIT_HLIST_NODE(&rule->hash_list_anchor);
+
+	// Rule format described in @routing_table_store comments.
+
+	uint32_t channel = 0;
+	char dir_char = 0;
+	int chars_parsed = 0;
+	#define ICCOM_SKIF_JUMP_PARSE() \
+		{ count -= chars_parsed; buf += chars_parsed; chars_parsed = 0; }
+
+	// incoming message parameters
+    int args_count = sscanf(buf, " %u %c %n", &channel, &dir_char, &chars_parsed);
+	if (args_count != 2 || (dir_char != 'u' && dir_char != 'd')) {
+		iccom_skif_err("Rule parsing error, the Rule string must start with"
+		               " message incoming channel number (positive int) and"
+					   " then the char 'u' or 'd' describing initial message"
+					   " direction. Example:  \"1234u\" or \" 1234 u\"for"
+					   " message incoming via channel 1234 and originally"
+					   " directing upwards.\n\n"
+					   " NOTE: all whitespaces including newlines are ignored.\n"
+					   "\n"
+					   " Offending location: %s\n", buf);
+		ret = -EINVAL;
+		goto cleanup_rule;
+	}
+
+	rule->incoming_channel = channel;
+	rule->initial_direction = (dir_char == 'u');
+
+	ICCOM_SKIF_JUMP_PARSE();
+
+	// scan actions, one per cycle
+	while (count) {
+		chars_parsed = skip_spaces(buf) - buf;
+		ICCOM_SKIF_JUMP_PARSE();
+
+		// the default action check
+		if (count && buf[0] == 'x') {
+			rule->use_default_action = true;
+			chars_parsed = 1;
+			ICCOM_SKIF_JUMP_PARSE();
+			continue;
+		}
+		if (count && buf[0] == ';') {
+			// parsing done
+			chars_parsed = 1;
+			ICCOM_SKIF_JUMP_PARSE();
+			break;
+		}
+		if (count && buf[0] == 0) {
+			iccom_skif_err("Something got wrong, 0-char mid of"
+					" the string buffer, while semicolon or"
+					" next action is expected.");
+			ret = -EINVAL;
+			goto cleanup_rule;
+		}
+
+		// incoming message parameters
+		args_count = sscanf(buf, " %u %c %n", &channel, &dir_char, &chars_parsed);
+		if (args_count != 2 || (dir_char != 'u' && dir_char != 'd')) {
+			iccom_skif_err(
+					"Rule parsing error, the Rule action list must follow"
+					" the Rule header (message incoming channel number + "
+					" initial message direction). The action list itself"
+					" consists of 0 or more action records. After last action"
+					" there MUST be a ';' char which denotes the end of the"
+					" rule record. Each action consists of"
+					" Target channel number (unsigned int) followed by target"
+					" message direction 'u' (upwards) or 'd' (downwards)."
+					" Alternatively rule can be one 'x' char saying \"default\""
+					" action to be taken (continue same channel same direction)."
+					" Example:  \"234d\" to send message downwards via channel"
+					" 234.\n"
+					"\n"
+					" Offending location: %s", buf);
+			ret = -EINVAL;
+			goto cleanup_rule;
+		}
+
+		if (rule->custom_acts_size >= ICCOM_SKIF_ROUTING_MAX_ACTIONS) {
+			iccom_skif_err("Sorry, we don't support more than "
+					" %d custom actions per rule (this can be configured"
+					" at build time).\n"
+					"\n"
+					" Offending location: %s"
+					, ICCOM_SKIF_ROUTING_MAX_ACTIONS, buf);
+			ret = -EINVAL;
+			goto cleanup_rule;
+		}
+
+		rule->custom_acts[rule->custom_acts_size].dst_channel = channel;
+		rule->custom_acts[rule->custom_acts_size].direction = (dir_char == 'u');
+		rule->custom_acts_size += 1;
+
+		ICCOM_SKIF_JUMP_PARSE();
+	}
+
+	*out = rule;
+	return orig_count - count;
+
+cleanup_rule:
+	kfree(rule);
+	return ret;
+	#undef ICCOM_SKIF_JUMP_PARSE
+}
+
+// Provides an ability to set the routing table from US.
+//
+// NOTE: @count counts the string length without final 0.
+// 
+// NOTE: writing "-;" command string disables routing and IccomSkif goes
+//		into classical mode (with only loopback option available).
+//
+// NOTE: if routing is enabled, then EVERYTHING WHICH IS NOT EXPLICITLY
+//		ALLOWED IS BLOCKED.
+//
+// NOTE: no need to syncronize routing table writes, cause sysfs
+//		shall take care of write operations sync.	
+//
+// FORMAT: 			(NOTE: ${X} means "contents of X")
+//
+//		NOTE: input format is a sequence of commands. Commands
+//			are separated with semicolons. All whitespaces are ignored.
+//			Each command must end with semicolon (including the last one).
+//
+//  * <GLOBAL_COMMANDS_LIST>:  "${CMD};${CMD};....${CMD};"
+//		OPTIONAL SEMICOLON SEPARATED LIST of global commands, available
+//		commands are:
+//		* "+":
+//          when given, then the incoming data will be appended to
+//          existing table
+//		* "-":
+//			will drop the routing and switch IccomSkif into classic mode.
+//		* `x`:
+//          set default action for all channels and directions to `allow`,
+//		    meaning that if channel is not mentioned explicitly in routing
+//		    table, then the message will just continue as it goes: same
+//			channel, same direction.
+//
+//		EXAMPLE:
+//			"+; <some rules here>" will append the rules defined after "+"
+//			command to the existing routing table.
+//		EXAMPLE:
+//			" x;\n" will drop the routing and switch to the classic mode.
+//			NOTE: all whitespaces including newlines are ignored.
+//
+//  * <RULES_LIST>: "${RULE};${RULE};...${RULE};"
+//  	A SEMICOLON SEPARATED LIST of rules. All whitespaces including
+//      newlines are ignored.
+//
+//		Each RULE is the string of following format:
+//      * "${INCOMING_CHANNEL_NUMBER}${INCOMING_DIR}${ACTION}...${ACTION}"
+//         where:
+//         * INCOMING_CHANNEL_NUMBER is positive decimal integer
+//           describing original message channel.
+//             * EXAMPLE: "1234"
+//         * INCOMING_DIR is original message direction: either 'u'
+//           for UPWARD direction (from transport driver to User Space),
+//           OR 'd' for DOWNWARD direction (from US to transport driver)
+//             * EXAMPLE: "u"
+//         * ACTION is either "x" for default action, or a string:
+//			 "${DST_CHANNEL}${DST_DIRECTION}", where
+//             * DST_CHANNEL is the channel number to send the msg
+//                 * EXAMPLE: "421"
+//             * DST_DIRECTION is the destination direction to send
+//               the msg ('u' or 'd'):
+//                 * EXAMPLE: "d"
+//
+//	Here are some full examples:
+//
+//	EXAMPLE:
+//
+// 		NOTE: all whitespaces including newlines are ignored.
+//
+//		" - ;\n"
+//          same as next example
+//		"-;"
+//          Global command: disable routing, switch to classical mode.
+//		"123ux;\n"
+//          One rule: messages incoming via ch 123 UPWARDS will be subjected
+//          to default action (continue upwards the same channel),
+//          all other channels and directions are blocked.
+//		"123u 24u 351u 1000d x;"
+//			same as next example:
+//		" 123u 24u 351u 1000d x;  \n\n"
+//			same as next example:
+//		"123u24u351u1000dx;"
+//          One rule: messages incoming via ch 123 UPWARDS will be sent to
+//          * channel 24 upwards,
+//          * channel 351 upwards,
+//          * channel 1000 downwards,
+//          * channel 123 upwards (default),
+//          all other channels and directions are blocked.
+//		"123ux;\n"
+//		" 123dx  ;\n"
+//          Two rules. Messages on ch 123 will continue as they go
+//          (so 123 channel is bidirectional IO),
+//          all other channels are blocked.
+//		"123ux;"
+//		"123dx;"
+//		"3411ux;"
+//		"5522dx;"
+//          4 rules. Messages on ch 123 will continue as they go
+//          (so 123 channel is bidirectional IO),
+//			channel 3411 is readonly for US,
+//          channel 5522 is writeonly for US,
+//          all other channels are blocked.
+//		"123ux1111u;"
+//		"123dx1111u;"
+//		"3411ux1111u;"
+//		"5522dx1111u;"
+//          4 rules. Messages on ch 123 will continue as they go
+//          (so 123 channel is bidirectional IO),
+//			channel 3411 is readonly for US,
+//          channel 5522 is writeonly for US,
+//			copy of all non-blocked messages will be
+//			delivered to channel 1111 toward US,
+//          all other channels are blocked.
+//
+// RETURNS:
+//      >= 0: number of bytes actually provided to userspace, on success
+//      < 0: negated error code, on failure
+static ssize_t routing_table_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	ICCOM_SKIF_CHECK_PTR(buf, return -EINVAL);
+
+	struct iccom_sockets_device *iccom_sk
+		= (struct iccom_sockets_device *)dev_get_drvdata(dev);
+
+	if (IS_ERR_OR_NULL(iccom_sk)) {
+		iccom_skif_err("No iccom_skif device.");
+		return -EINVAL;
+	}
+
+	if (buf[count] != 0) {
+		iccom_skif_err("Input buffer must be a valid C-string, and end up with 0-char.");
+		return -EINVAL;
+	}
+
+	const char *orig_buf = buf;
+	const size_t orig_count = count;
+
+	int ret = 0;
+
+	#define ICCOM_SKIF_JUMP_PARSE() \
+		{ count -= chars_parsed; buf += chars_parsed; chars_parsed = 0; }
+
+	// OK, starting parsing.
+
+	char global_cmd = 0;
+	int chars_parsed = 0;
+	// NOTE: the return of sscanf does NOT include %n chars parsed variable
+	int args_count = sscanf(buf, " %c ; %n", &global_cmd, &chars_parsed);
+
+	// got global cmd
+	if (args_count == 1 && chars_parsed) {
+		ICCOM_SKIF_JUMP_PARSE();
+	}
+
+	// If the cmd is "-", then routing
+	// gets disabled and IccomSkif switches into classical mode.
+	if (global_cmd == '-') {
+		if (count > 0) {
+			iccom_skif_info("Extra data is expected with global command '-'."
+			                " If you drop the table, just use \"x;\" with optional"
+							" whitespaces here-there. Incoming table: %s\n"
+							" Stopped at pos %zu, chars left: %zu."
+							, orig_buf, buf - orig_buf, count);
+			return -EINVAL;
+		}
+		// NOTE: sysfs takes care that there are no concurrent write IO
+		__iccom_skif_routing_drop(iccom_sk);
+		return orig_count;
+	}
+	
+	// preparing a new routing table
+	struct iccom_skif_routing *new_rt = kmalloc(sizeof(*new_rt), GFP_KERNEL);
+
+	if (IS_ERR_OR_NULL(new_rt)) {
+		iccom_skif_err("No memory for new routing table, sorry.");
+		return -ENOMEM;
+	}
+
+	hash_init(new_rt->rules);
+	new_rt->allowed_by_default = false;
+
+	// "x" means "use the 'allowed' as default instead of 'blocked'"
+	if (global_cmd == 'x') {
+		new_rt->allowed_by_default = true;
+	}
+
+	// If first cmd is "+" then we append new table to existing routing table.
+	if (global_cmd == '+') {
+		// NOTE: just raw "+" - no effect, old rt persists
+		if (count == 0) {
+			ret = orig_count;
+			iccom_skif_info("Old routing table persisted with no changes."
+					" If you want to append the rules to existing table just"
+					" append them after \"+;\" command.");
+			goto release_new_rt;
+		}
+
+		// NOTE: sysfs takes care that only one writer presents at every
+		//  moment. We can safely read the Routing Table without
+		//  concurrency concerns (as long as this sysfs store call the
+		//  only guy who can change routing table).
+
+		// NOTE: we don't do the move of the buckets, cause a lock shall be
+		//  needed in this case, else readers will see table routing in a
+		//  transient state (some buckets are moved and some remain attached,
+		//  which is inconsistent).
+
+		if (__iccom_skif_routing_table_append(iccom_sk->routing, new_rt) != 0) {
+			ret = -ENOMEM;
+			iccom_skif_err("Failed to append old rules.");
+			goto release_new_rt;
+		};
+	}
+
+	// now parsing the rules.
+	int rule_idx = 0;
+	while (count) {
+		struct iccom_skif_routing_rule *new_rule;
+		chars_parsed = __iccom_skif_parse_rule(buf, count + 1, &new_rule);
+		if (chars_parsed < 0) {
+			iccom_skif_err("Failed to parse the Routing Table: \"%s\"."
+			 		" Failed rule position: %zu, rule index: %d"
+					, orig_buf, buf - orig_buf, rule_idx);
+			ret = -EINVAL;
+			goto release_new_rt;
+		}
+
+		if (!chars_parsed) {
+			iccom_skif_info("Routing Table was successfully parsed.");
+			break;
+		}
+
+		// check it it already exists, then discard it
+		if (IS_ERR_OR_NULL(__iccom_skif_match_rule(
+					new_rt->rules, ICCOM_SKIF_ROUTING_HASH_SIZE_BITS
+					, new_rule->incoming_channel, new_rule->initial_direction))) {
+			hash_add(new_rt->rules, &new_rule->hash_list_anchor
+						, __iccom_skif_routing_hkey(new_rule->incoming_channel
+													, new_rule->initial_direction));
+		} else {
+			iccom_skif_warning("Duplicated Rule Filter in Routing Table: \"%s\"."
+			 		" Duplicating rule position: %zu, rule index: %d. Will ignore"
+					" everything except for the first rule entry."
+					, orig_buf, buf - orig_buf, rule_idx);
+		}
+
+		rule_idx += 1;
+		ICCOM_SKIF_JUMP_PARSE();
+	}
+
+	// NOTE: as long as store is the only RT updater, the sysfs will take care
+	// 	about avoiding concurrent updaters.
+	struct iccom_skif_routing *old_rt = iccom_sk->routing;
+	rcu_assign_pointer(iccom_sk->routing, new_rt);
+
+	synchronize_rcu();
+	__iccom_skif_routing_free(&old_rt);
+
+	return orig_count;
+
+release_new_rt:
+	__iccom_skif_routing_free(&new_rt);
+	return ret;
+
+	#undef ICCOM_SKIF_JUMP_PARSE
+}
+
+// Exhibits the current Routing Table to the US.
+//
+// NOTE: for the format description see the @routing_table_store function.
+//
+// NOTE: for now we're limit ourselves to one PAGE output size.
+//
+// RETURNS:
+//      >= 0: number of bytes actually provided to userspace, on success
+//      < 0: negated error code, on failure
+static ssize_t routing_table_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	ICCOM_SKIF_CHECK_PTR(buf, return -EINVAL);
+
+	struct iccom_sockets_device *iccom_sk
+		= (struct iccom_sockets_device *)dev_get_drvdata(dev);
+
+	if (IS_ERR_OR_NULL(iccom_sk)) {
+		iccom_skif_err("Invalid parameters.");
+		return -EINVAL;
+	}
+
+	ssize_t count = 0;
+
+	rcu_read_lock();
+
+	struct iccom_skif_routing *rt = rcu_dereference(iccom_sk->routing);
+
+	// routing disabled case
+	if (IS_ERR_OR_NULL(rt)) {
+		count += scnprintf(buf + count, PAGE_SIZE - count, "-;");
+		goto done;
+	}
+
+	// routing enabled
+
+	if (rt->allowed_by_default) {
+		count += scnprintf(buf + count, PAGE_SIZE - count, "x;\n");
+	}
+
+	int bkt;
+	struct iccom_skif_routing_rule *rule = NULL;
+	hash_for_each(rt->rules, bkt, rule, hash_list_anchor) {
+		count += __iccom_skif_print_rule(rule, buf + count, PAGE_SIZE - count);
+		// to look nice, split in lines
+		count += scnprintf(buf + count, PAGE_SIZE - count, "\n");
+	}
+
+done:
+	rcu_read_unlock();
+	return count;
+}
+static DEVICE_ATTR(routing_table, 0600, routing_table_show, routing_table_store);
 
 // @buf pointer to the beginning of the string buffer
 //      NOTE: buffer can be temporary modified within parsing
@@ -746,6 +1598,8 @@ static ssize_t set_loopback_rule_store(struct device *dev,
 	WRITE_ONCE(iccom_sk->lback_map_rule, new_rule);
 
 	if (!IS_ERR_OR_NULL(tmp_ptr)) {
+		// BAD! RefCounter needed! The old map-rule might
+		// be still in use at the moment of deletion!
 		kfree(tmp_ptr);
 		tmp_ptr = NULL;
 	}
@@ -858,6 +1712,7 @@ static int iccom_skif_init(struct iccom_sockets_device *iccom_sk)
 	iccom_sk->iccom = NULL;
 	iccom_sk->lback_map_rule = NULL;
 
+	rcu_assign_pointer(iccom_sk->routing, NULL);
 	iccom_skif_reset_protocol_family(iccom_sk);
 	init_completion(&iccom_sk->initialized);
 	init_completion(&iccom_sk->socket_closed);
@@ -886,6 +1741,8 @@ static int iccom_skif_close(struct iccom_sockets_device *iccom_sk)
 	__iccom_skif_unreg_socket_family(iccom_sk);
 	__iccom_skif_protocol_device_close(iccom_sk);
 	iccom_skif_reset_protocol_family(iccom_sk);
+	__iccom_skif_routing_drop(iccom_sk);
+
 	return 0;
 }
 
@@ -905,8 +1762,8 @@ static int iccom_skif_run(struct iccom_sockets_device *iccom_sk)
 	if (res < 0) {
 		goto failed;
 	}
-	iccom_skif_info_raw("opened kernel netlink socket: %px"
-				, iccom_sk->socket);
+	iccom_skif_info_raw("opened kernel netlink socket: %px, family: %d"
+				, iccom_sk->socket, iccom_sk->protocol_family_id);
 	res = __iccom_skif_protocol_device_init(iccom_sk);
 	if (res < 0) {
 		goto failed;
@@ -1083,7 +1940,7 @@ static ssize_t create_device_store(struct class *class, struct class_attribute *
 				 device_id);
 		return -EINVAL;
 	}
-	iccom_skif_info("Device iccom socket.%d created", device_id);
+	iccom_skif_info("Iccom Scif device .%s created", dev_name(&new_pdev->dev));
 
 	return count;
 }
@@ -1354,12 +2211,13 @@ static DEVICE_ATTR_WO(protocol_family);
 // @dev_attr_protocol_family the ICCom socket protocol_family file
 // @dev_attr_read_loopback_rule the ICCOM socket read_loopback_rule file
 // @dev_attr_set_loopback_rule the ICCOM socket set_loopback_rule file
-
+// @dev_attr_routing_table the ICComSkif routing table IO.
 static struct attribute *iccom_skif_dev_attrs[] = {
 	&dev_attr_iccom_dev.attr,
 	&dev_attr_protocol_family.attr,
 	&dev_attr_read_loopback_rule.attr,
 	&dev_attr_set_loopback_rule.attr,
+	&dev_attr_routing_table.attr,
 	NULL
 };
 
@@ -1538,11 +2396,11 @@ static int iccom_skif_device_tree_node_setup(struct platform_device *pdev,
 static int iccom_skif_probe(struct platform_device *pdev)
 {
 	if (IS_ERR_OR_NULL(pdev)) {
-		iccom_skif_err("Probing a Iccom Socket Device failed: NULL");
+		iccom_skif_err("probing a Iccom Socket device failed: NULL");
 		return -EINVAL;
 	}
 
-	iccom_skif_info("Probing an Iccom Sk Device with id: %d", pdev->id);
+	iccom_skif_info("probing IccomSkif device with id: %d", pdev->id);
 
 	struct iccom_sockets_device *iccom_sk =
 			(struct iccom_sockets_device *)kzalloc(sizeof(struct iccom_sockets_device),
@@ -1563,12 +2421,13 @@ static int iccom_skif_probe(struct platform_device *pdev)
 	if (!IS_ERR_OR_NULL(pdev->dev.of_node)) {
 		ret = iccom_skif_device_tree_node_setup(pdev, iccom_sk);
 		if (ret != 0) {
-			iccom_skif_err("Unable to setup device tree node: %d",
-					ret);
+			iccom_skif_err("Unable to setup device tree node: %d", ret);
 			goto free_iccom_skif_data;
 		}
 	}
 	dev_set_drvdata(&pdev->dev, iccom_sk);
+
+	iccom_skif_info("IccomSkif device %s created.", dev_name(&pdev->dev));
 
 	return 0;
 
@@ -1655,10 +2514,11 @@ struct platform_driver iccom_skif_driver = {
 static void __iccom_skif_netlink_data_ready(struct sk_buff *skb)
 {
 	// NOTE: This kernel function will loop the iccom socket devices till
-	//       one of the devices socket id matches the skb socket id. Then it
-	//       the msg from skb will be dispatched through the found iccom socket device
+	//       one of the devices socket id matches the skb socket id. Then
+	//       the msg from skb will be dispatched through the found iccom
+	//       socket device.
 	int ret = driver_for_each_device(&iccom_skif_driver.driver, NULL, skb,
-				&__iccom_skif_select_device_for_dispatching_msg_down);
+				&__iccom_skif_handle_us_msg);
 
 	if (ret != ICCOM_SKIF_DEVICE_FOUND) {
 		iccom_skif_err("Failed to dispatch msg down for the "
