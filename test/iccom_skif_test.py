@@ -79,7 +79,7 @@ def create_netlink_msg(payload, priority):
 # RETURNS: The payload message extracted
 def extract_netlink_data(netlink_msg):
         # **payload + header** size (without padding)
-        stated_msg_len = ((netlink_msg[1] << 8) or netlink_msg[0])
+        stated_msg_len = ((netlink_msg[1] << 8) | netlink_msg[0])
         payload_len = stated_msg_len - NLMSG_HDR_SIZE_BYTES
 
         # payload and header definitely must fit
