@@ -816,3 +816,102 @@ And here are the promised textual examples:
     also will be multicasted to the channel `66` in US. Writing to this channel
     from US side is OK, cause all non-mentioned pairs or channel+direction are
     allowed by default in `x` mode.
+
+# Iccom TTY guide
+
+ICCom TTY device is the usual TTY device which uses ICCom as the underlying transport.
+
+ICCom based TTY device is defined and configured via Device Tree or
+via `/sys/class/iccom_tty/create_iccom_tty` file.
+
+ICCom TTY is created bound to a specific ICCom channel (configured in DT).
+Writing to the TTY will send the message via configured ICCom channel,
+and reading from the TTY will read the message from ICCom channel.
+
+Here it is the Device Tree configuration to create the ICCom TTY device.
+
+## ICCom TTY creation via sysfs
+
+**NOTE:** the dynamic creation of the ICCom TTY is supported only with
+    kernel supporting dynamic Device Tree (>=v6.6)
+
+**NOTE:** for more detailed information you can consult the `test/iccom_tty_test.py`
+
+Run the following to create an ICCom TTY device on top of the `iccom.0` ICCom
+device, using the `1234` channel, and the TTY number `8`.
+
+```
+echo -n "iccom.0:1234:8" > /sys/class/iccom_tty/create_iccom_tty"
+```
+
+In general it can be summarized as following:
+
+```
+echo -n "ICCOM_DEV_NAME:ICCOM_CHANNEL:TTY_NUMBER" > /sys/class/iccom_tty/create_iccom_tty"
+```
+
+This will create the device at `/sys/class/tty/ttyICCOM${TTY_NUMBER}`.
+
+**NOTE:** despite this indeed will create the device, but it will not be
+  visible yet as `/dev/ttyICCOM*`, to make it visible, one needs to make device
+  node there (same way as udev is doing for usual TTYs). See the `test/iccom_tty_test.py`
+  for more information.
+
+## ICCom TTY creation via device tree
+
+To add the ICCom TTY device into Device Tree use the following record.
+
+```
+// ICCom TTY definition
+// it will be attached to ICCom iccom0, and use the channel 7435
+ictty0: ictty0 {
+	compatible = "iccom_tty";
+
+	// ONE of TWO following MUST present:
+	//		NOTE: if both are preasent, only the @iccom_dev is relevant
+	// OR: @iccom_dev points to the iccom device to use via phandle
+  //
+  // NOTE: the specific iccom0 node reference is only an example
+	iccom_dev = <&iccom0>;
+	// OR: @iccom_dev points to the iccom device to use via iccom dev name
+  //
+  // NOTE: the specific iccom.0 device name is only an example
+	iccom_dev_name = "iccom.0";
+	
+  // mandatory property, tells the iccom channel to use for this tty
+  // NOTE: specific channel number is an example 
+	channel = <7435>;
+
+  // mandatory property, the TTY number, will appear in the TTY
+  // device name, like ttyICCOM4
+  tty_number= <4>;
+
+	// optional, max msg size [bytes] sets the max iccom message size to
+	// use (bigger messages will be split into separate messages),
+	// defaults to 128.
+	max_msg_size = <256>;
+};
+```
+
+**NOTE:** for more info feel free to consult the `src/iccom_tty.c` in `ictty_probe`
+  function.
+
+
+## ICCom TTY Operation
+
+OK, now, given that we have created the ICCom TTY device, we now can read from and write
+to it, using standard TTY tooling.
+
+Using the original sysfs device location:
+
+```
+screen /sys/class/tty/ttyICCOM0 # to run session over ICCom TTY 0
+```
+
+or using the standard device location
+
+```
+screen /dev/ttyICCOM0 # to run session over ICCom TTY 0
+```
+
+For the rest let the search for Linux TTY be with you.

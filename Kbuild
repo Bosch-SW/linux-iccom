@@ -34,7 +34,9 @@ ifeq ($(CONFIG_BOSCH_ICCOM_TEST_MODULE), y)
     obj-m += src/iccom_test.o
 endif
 
+# Client drivers of the ICCom bus
 obj-$(CONFIG_BOSCH_ICCOM_SOCKETS) += src/iccom_socket_if.o
+obj-$(CONFIG_BOSCH_ICCOM_TTY) += src/iccom_tty.o
 
 # Custom protocol aggregator drivers
 obj-$(CONFIG_BOSCH_ICCOM_EXAMPLE) += iccom-example.o

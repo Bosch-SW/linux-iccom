@@ -5,6 +5,7 @@ from iccom import iccom_version
 
 import iccom_test
 import iccom_skif_test
+import iccom_tty_test
 
 def execute_command(command):
     if (subprocess.run(command, shell=True).returncode != 0):
@@ -41,6 +42,7 @@ if __name__ == '__main__':
             "/modules/iccom.ko"
             , "/modules/fd_test_transport.ko"
             , "/modules/iccom_socket_if.ko"
+            , "/modules/iccom_tty.ko"
             ]):
 
         print("ICCom repository revision: %s" % (iccom_version(None),))
@@ -48,6 +50,7 @@ if __name__ == '__main__':
         # Run tests
         tests.append(iccom_test.run_tests())
         tests.append(iccom_skif_test.run_tests())
+        tests.append(iccom_tty_test.run_tests())
 
     for t in tests:
          t.print()

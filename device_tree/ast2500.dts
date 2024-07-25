@@ -19,6 +19,13 @@
 			transport_dev = <&fd_test_transport0>;
 	};
 
+	ictty0: ictty0 {
+			compatible = "iccom_tty";
+			iccom_dev = <&iccom0>;
+			channel = <17435>;
+			tty_number= <4>;
+	};
+
 	fd_test_transport0: fd_test_transport0 {
 			compatible = "fd_test_transport";
 	};

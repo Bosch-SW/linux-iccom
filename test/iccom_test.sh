@@ -71,9 +71,8 @@ check_wire_xfer() {
         echo "Expectation failed!"
         echo "Expected: " ${exp_rcv_data}
         echo "Received: " ${rcv_data}
-        exit
+        false
     fi
-
 }
 
 iccom_data_exchange_to_transport_with_iccom_data_with_transport_data() {

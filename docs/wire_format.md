@@ -138,3 +138,36 @@ and continue:
   current logical channel is completed (can be delivered to upper layer).
   This byte value is computed as `channel & 0x007F | (complete ? 0x80 : 0x0)`.
 * `[4; ...] bytes`: the payload bytes, the user message bytes.
+
+## Practical section for those who like practice
+
+One might want to check how the ICCom package is looking like for
+specific data. The best way to get the answer is the following.
+
+Go to the `./test` folder of the ICCom repo.
+
+Start python3 there (**NOTE:** it will not work with python 2).
+
+Run the following in the python3 shell.
+
+```python
+
+# gets common iccom methods
+import iccom
+
+# for example you want to see how the package with
+# ID=3 and empty payload would look like:
+# NOTE: on iccom_package
+#   * first argument: package ID in range [0;255]
+#   * second argument: bytearray of the package payload (must fit into package)
+#   * RETURNS: the bytearray representing the iccom package on-wire
+iccom.iccom_package(3, bytearray()).hex()
+
+# or the package with ID=4 and payload on the channel 123: "hello!"
+# NOTE: on iccom_packet
+#   * first argument: the packet channel number
+#   * second argument: the bytearray of the payload of the packet
+#   * third argument: the message completeness flag
+#   * RETURNS: the packet binary representation as it is written into package.
+iccom.iccom_package(3, iccom.iccom_packet(123, "hello!".encode("utf-8"), True)).hex()
+```

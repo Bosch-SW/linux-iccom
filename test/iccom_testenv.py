@@ -27,7 +27,7 @@ class IccomTestEnv:
         
                # initial indexes of the iccom for internal confirmations
                self.inbound_package_num = 1
-               self.outbound_package_num = 1
+               self.outbound_package_num = 0
 
         def get_one_dev_name(dev_type):
 
