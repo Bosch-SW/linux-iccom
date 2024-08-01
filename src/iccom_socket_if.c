@@ -29,7 +29,9 @@
 #include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/platform_device.h>
+#include <linux/of.h>
 #include <linux/of_device.h>
+#include <linux/of_platform.h>
 #include <linux/hashtable.h>
 
 #include <linux/iccom.h>
@@ -127,6 +129,14 @@
 // to keep the compatibility with Kernel versions earlier than v5.5
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
 	#define pr_warning pr_warn
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)
+	#define ICCOM_SKIF_CLASS_MODIFIER const
+	#define ICCOM_SKIF_CLASS_ATTR_MODIFIER const
+#else
+	#define ICCOM_SKIF_CLASS_MODIFIER
+	#define ICCOM_SKIF_CLASS_ATTR_MODIFIER
 #endif
 
 #define iccom_skif_err(fmt, ...)					\
@@ -315,26 +325,21 @@ struct ida iccom_skif_dev_id;
 
 /* --------------------- FORWARD DECLARATIONS ---------------------------*/
 
-static int __iccom_skif_dispatch_msg_up(
-		struct iccom_sockets_device *iccom_sk
-		, const uint32_t dst_channel
-		, const void *const data
-		, const size_t data_size_bytes
-		, const int priority);
-
-inline int __iccom_skif_dispatch_msg_down(
-		struct iccom_sockets_device *iccom_sk
-		, const uint32_t dst_channel
-		, const void *const data
-		, const size_t data_size_bytes
-		, const int priority);
-
+int __iccom_skif_handle_us_msg(struct device *dev, void *skb_ptr);
+static bool __iccom_skif_msg_rx_callback(
+		unsigned int channel
+		, void *msg_data, size_t msg_len
+		, void *consumer_data);
+inline int __iccom_skif_routing_hkey(const uint32_t channel
+		, const bool direction);
 static int __iccom_skif_match_channel2lbackrule(
-	const struct iccom_skif_loopback_mapping_rule *const rule
-	, const int channel);
-
-static void __iccom_skif_netlink_data_ready(struct sk_buff *skb);
-
+		const struct iccom_skif_loopback_mapping_rule *const rule
+		, const int channel);
+static int __iccom_skif_lback_rule_verify(
+		const struct iccom_skif_loopback_mapping_rule *const rule);
+inline struct iccom_skif_routing_rule *__iccom_skif_match_rule(
+		struct hlist_head *rules_hash
+		, int hash_size_bits, int in_channel, bool in_dir);
 static int __iccom_skif_route_msg(
 		struct iccom_sockets_device *iccom_sk
 		, const uint32_t in_channel
@@ -342,6 +347,96 @@ static int __iccom_skif_route_msg(
 		, const void *const data
 		, const size_t data_size_bytes
 		, const int priority);
+inline int __iccom_skif_dispatch_msg_down(
+		struct iccom_sockets_device *iccom_sk
+		, const uint32_t dst_channel
+		, const void *const data
+		, const size_t data_size_bytes
+		, const int priority);
+static int __iccom_skif_dispatch_msg_up(
+		struct iccom_sockets_device *iccom_sk
+		, const uint32_t dst_channel
+		, const void *const data
+		, const size_t data_size_bytes
+		, const int priority);
+static int __iccom_skif_reg_socket_family(
+		struct iccom_sockets_device *iccom_sk);
+static void __iccom_skif_unreg_socket_family(
+		struct iccom_sockets_device *iccom_sk);
+static ssize_t read_loopback_rule_show(struct device *dev,
+		struct device_attribute *attr
+		, char *buf);
+void __iccom_skif_routing_free(struct iccom_skif_routing **rt);
+void __iccom_skif_routing_drop(struct iccom_sockets_device *iccom_sk);
+int __iccom_skif_routing_table_append(
+		struct iccom_skif_routing *from
+		, struct iccom_skif_routing *to);
+ssize_t __iccom_skif_print_rule(
+		struct iccom_skif_routing_rule *rule
+		, char *buf, ssize_t size);
+static ssize_t __iccom_skif_parse_rule(
+		const char *buf, size_t count
+		, struct iccom_skif_routing_rule **out);
+static ssize_t routing_table_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count);
+static ssize_t routing_table_show(struct device *dev,
+		struct device_attribute *attr,
+		char *buf);
+int  __iccom_skif_parse_lback_string(char *const buf
+		, const size_t len
+		, struct iccom_skif_loopback_mapping_rule *const out);
+static ssize_t set_loopback_rule_store(struct device *dev,
+		struct device_attribute *attr
+		, const char *buf, size_t count);
+static int __iccom_skif_loopback_ctl_init(
+		struct iccom_sockets_device *iccom_sk);
+static void __iccom_skif_loopback_ctl_close(
+		struct iccom_sockets_device *iccom_sk);
+static void __iccom_skif_protocol_device_close(
+		struct iccom_sockets_device *iccom_sk);
+static int __iccom_skif_protocol_device_init(
+		struct iccom_sockets_device *iccom_sk);
+static void iccom_skif_reset_protocol_family(struct iccom_sockets_device *iccom_sk);
+static int iccom_skif_init(struct iccom_sockets_device *iccom_sk);
+static int iccom_skif_close(struct iccom_sockets_device *iccom_sk);
+static int iccom_skif_run(struct iccom_sockets_device *iccom_sk);
+static int iccom_skif_stop(struct iccom_sockets_device *iccom_sk);
+size_t iccom_skif_sysfs_trim_buffer(char *buf, size_t size);
+static ssize_t version_show(
+		ICCOM_SKIF_CLASS_MODIFIER struct class *class
+		, ICCOM_SKIF_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, char *buf);
+static ssize_t delete_device_store(
+		ICCOM_SKIF_CLASS_MODIFIER struct class *class
+		, ICCOM_SKIF_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count);
+static ssize_t create_device_store(
+		ICCOM_SKIF_CLASS_MODIFIER struct class *class
+		, ICCOM_SKIF_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count);
+static ssize_t iccom_dev_show(struct device *dev
+		, struct device_attribute *attr
+		, char *buf);
+static ssize_t iccom_dev_store(struct device *dev
+		, struct device_attribute *attr
+		, const char *buf, size_t count);
+static int iccom_skif_pfamily_avail(struct device *dev, void *data);
+static ssize_t protocol_family_store(struct device *dev,
+		struct device_attribute *attr
+		, const char *buf, size_t count);
+static int iccom_skif_new_pfamily(struct platform_device *pdev);
+static int iccom_skif_validate_pfamily(struct platform_device *pdev
+		, int *protocol_family);
+static int iccom_skif_device_tree_node_setup(
+		struct platform_device *pdev
+		, struct iccom_sockets_device *iccom_sk);
+static int iccom_skif_probe(struct platform_device *pdev);
+static int iccom_skif_remove(struct platform_device *pdev);
+static void __iccom_skif_netlink_data_ready(struct sk_buff *skb);
+static int __init iccom_skif_module_init(void);
+static void __exit iccom_skif_module_exit(void);
+
 
 /* --------------------- ENTRY POINTS -----------------------------------*/
 
@@ -796,7 +891,9 @@ static int __iccom_skif_reg_socket_family(
 			, .input = &__iccom_skif_netlink_data_ready
 			, .cb_mutex = NULL
 			, .bind = NULL
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,4,0)
 			, .compare = NULL
+#endif
 			};
 	// TODO: optionally: add support for earlier versions of kernel
 	iccom_sk->socket = netlink_kernel_create(&init_net
@@ -1836,7 +1933,9 @@ size_t iccom_skif_sysfs_trim_buffer(char *buf, size_t size)
 //     > 0: size of data to be showed in user space
 //      <0: negated error code
 static ssize_t version_show(
-		struct class *class, struct class_attribute *attr, char *buf)
+		ICCOM_SKIF_CLASS_MODIFIER struct class *class
+		, ICCOM_SKIF_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, char *buf)
 {
 	return scnprintf(buf, PAGE_SIZE, "%s", ICCOM_VERSION);
 }
@@ -1856,8 +1955,10 @@ static CLASS_ATTR_RO(version);
 // RETURNS:
 //  count: ok
 //     <0: negated error code
-static ssize_t delete_device_store(struct class *class, struct class_attribute *attr,
-						 const char *buf, size_t count)
+static ssize_t delete_device_store(
+		ICCOM_SKIF_CLASS_MODIFIER struct class *class
+		, ICCOM_SKIF_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count)
 {
 	if (count >= PAGE_SIZE) {
 		iccom_skif_err("Sysfs data can not fit the 0-terminator.");
@@ -1923,8 +2024,10 @@ static CLASS_ATTR_WO(delete_device);
 // RETURNS:
 //  count: ok
 //     <0: negated error code
-static ssize_t create_device_store(struct class *class, struct class_attribute *attr,
-					const char *buf, size_t count)
+static ssize_t create_device_store(
+		ICCOM_SKIF_CLASS_MODIFIER struct class *class
+		, ICCOM_SKIF_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count)
 {
 	int device_id = ida_alloc(&iccom_skif_dev_id, GFP_KERNEL);
 	if (device_id < 0) {
@@ -1970,7 +2073,9 @@ ATTRIBUTE_GROUPS(iccom_skif_class);
 // @class_groups group holding all the attributes
 static struct class iccom_skif_class = {
 	.name = "iccom_socket_if",
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,4,0)
 	.owner = THIS_MODULE,
+#endif
 	.class_groups = iccom_skif_class_groups
 };
 
@@ -2113,8 +2218,7 @@ static DEVICE_ATTR_RW(iccom_dev);
 // return:
 //      0 - input protocol family is not assigned to existing devices
 //      1 - input protocol family is already in use (stops search)
-static int iccom_skif_check_protocol_family_availability(struct device *dev,
-								void *data)
+static int iccom_skif_pfamily_avail(struct device *dev, void *data)
 {
 	struct iccom_sockets_device *iccom_sk =
 			(struct iccom_sockets_device *)dev_get_drvdata(dev);
@@ -2190,7 +2294,7 @@ static ssize_t protocol_family_store(struct device *dev,
 	}
 
 	ret = driver_for_each_device(dev->driver, NULL, &protocol_family,
-				&iccom_skif_check_protocol_family_availability);
+				&iccom_skif_pfamily_avail);
 	if (ret != 0) {
 		iccom_skif_err("Specified protocol family %s is already in "
 					"use. Please use a different one. (ret: %d)",
@@ -2231,13 +2335,15 @@ ATTRIBUTE_GROUPS(iccom_skif_dev);
 // return:
 //      >0: protocol family to be used
 //      <0: no netlink protocol family available
-static int iccom_skif_find_unused_protocol_family(struct platform_device *pdev)
+static int iccom_skif_new_pfamily(struct platform_device *pdev)
 {
 	int ret = 0;
 
-	for (int protocol_family = NETLINK_PROTOCOL_FAMILY_MIN; protocol_family < NETLINK_PROTOCOL_FAMILY_MAX+1; protocol_family++) {
+	for (int protocol_family = NETLINK_PROTOCOL_FAMILY_MIN;
+			protocol_family < NETLINK_PROTOCOL_FAMILY_MAX+1;
+			protocol_family++) {
 		ret = driver_for_each_device(pdev->dev.driver, NULL, &protocol_family,
-				&iccom_skif_check_protocol_family_availability);
+				&iccom_skif_pfamily_avail);
 		if (!ret) {
 			iccom_skif_info("Found available protocol family %d",
 					protocol_family);
@@ -2257,7 +2363,7 @@ static int iccom_skif_find_unused_protocol_family(struct platform_device *pdev)
 // return:
 //      0: verification was successfull and protocol family can be used
 //     <0: negated error code
-static int iccom_skif_validate_protocol_family(struct platform_device *pdev,
+static int iccom_skif_validate_pfamily(struct platform_device *pdev,
 							int *protocol_family)
 {
 	if (IS_ERR_OR_NULL(pdev) || IS_ERR_OR_NULL(protocol_family)) {
@@ -2269,7 +2375,7 @@ static int iccom_skif_validate_protocol_family(struct platform_device *pdev,
 	if (*protocol_family == NETLINK_PROTOCOL_FAMILY_RESET_VALUE) {
 		iccom_skif_warning("Protocol family property is not defined "
 					"or does not have a value");
-		*protocol_family = iccom_skif_find_unused_protocol_family(pdev);
+		*protocol_family = iccom_skif_new_pfamily(pdev);
 		if (*protocol_family == NETLINK_PROTOCOL_FAMILY_RESET_VALUE) {
 			iccom_skif_err("Failed to get available protocol "
 					 "family");
@@ -2284,12 +2390,14 @@ static int iccom_skif_validate_protocol_family(struct platform_device *pdev,
 				*protocol_family > NETLINK_PROTOCOL_FAMILY_MAX) {
 		iccom_skif_err("Protocol family property %d has a not supported "
 					"netlink value (shall be respect the following range "
-					"[%d, %d])", *protocol_family, NETLINK_PROTOCOL_FAMILY_MIN, NETLINK_PROTOCOL_FAMILY_MAX);
+					"[%d, %d])", *protocol_family
+					, NETLINK_PROTOCOL_FAMILY_MIN
+					, NETLINK_PROTOCOL_FAMILY_MAX);
 		return -EINVAL;
 	}
 
 	int ret = driver_for_each_device(pdev->dev.driver, NULL, protocol_family,
-				&iccom_skif_check_protocol_family_availability);
+				&iccom_skif_pfamily_avail);
 	if (ret) {
 		iccom_skif_err("Specified protocol family %d is already in "
 				 "use or is invalid . Please use a different "
@@ -2329,7 +2437,7 @@ static int iccom_skif_device_tree_node_setup(struct platform_device *pdev,
 				 "%d", ret);
 		return -EINVAL;
 	}
-	ret = iccom_skif_validate_protocol_family(pdev,
+	ret = iccom_skif_validate_pfamily(pdev,
 				&(iccom_sk->protocol_family_id));
 	if (ret) {
 		iccom_skif_err("Unable to validate or find valid protocol "
@@ -2534,14 +2642,29 @@ static void __iccom_skif_netlink_data_ready(struct sk_buff *skb)
 //     <0: negated error code
 static int __init iccom_skif_module_init(void)
 {
-	int ret;
-
 	ida_init(&iccom_skif_dev_id);
 
-	ret = platform_driver_register(&iccom_skif_driver);
-	class_register(&iccom_skif_class);
+	int ret = platform_driver_register(&iccom_skif_driver);
+	if (ret != 0) {
+		pr_err("iccom_skif: failed to register platform driver.");
+		goto unroll_ida;
+	}
+
+	ret = class_register(&iccom_skif_class);
+	if (ret != 0) {
+		pr_err("iccom_skif: failed to register iccom_skif class.");
+		goto unroll_platform_driver;
+	}
 
 	iccom_skif_info("Module loaded");
+
+	return 0;
+
+unroll_platform_driver:
+	platform_driver_unregister(&iccom_skif_driver);
+unroll_ida:
+	ida_destroy(&iccom_skif_dev_id);
+
 	return ret;
 }
 

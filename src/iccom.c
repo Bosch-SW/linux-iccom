@@ -47,6 +47,8 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/of_device.h>
+#include <linux/of.h>
+#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 
 #include <linux/full_duplex_interface.h>
@@ -323,6 +325,14 @@
     #define pr_warning pr_warn
 #endif
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)
+	#define ICCOM_CLASS_MODIFIER const
+	#define ICCOM_CLASS_ATTR_MODIFIER const
+#else
+	#define ICCOM_CLASS_MODIFIER
+	#define ICCOM_CLASS_ATTR_MODIFIER
+#endif
+
 #if ICCOM_VERBOSITY >= 1
 #define iccom_err(fmt, ...)						\
 	pr_err(ICCOM_LOG_PREFIX"%s: "fmt"\n", __func__, ##__VA_ARGS__)
@@ -445,6 +455,13 @@
 #define __iccom_err_report(err_no, sub_error_no)			\
 	__iccom_error_report(iccom, err_no, sub_error_no, __func__)
 
+/* ------------------------ FORWARD STRUCTS -----------------------------*/
+
+struct iccom_package;
+struct iccom_message_storage;
+struct iccom_message;
+struct iccom_test_sysfs_channel;
+
 /* ------------------------ FORWARD DECLARATIONS ------------------------*/
 
 struct full_duplex_xfer *__iccom_xfer_failed_callback(
@@ -460,6 +477,106 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 
 ssize_t __iccom_test_sysfs_initialize_ch_list(struct iccom_dev *iccom);
 void iccom_test_sysfs_ch_del(struct iccom_dev *iccom);
+
+
+bool __iccom_package_check_unused_payload(
+		struct iccom_package *package, uint8_t symbol);
+
+#ifdef ICCOM_DEBUG
+static void iccom_dbg_printout_package(struct iccom_package *pkg);
+static void iccom_dbg_printout_tx_queue(struct iccom_dev *iccom
+		, int max_printout_count);
+void iccom_dbg_printout_xfer(const struct full_duplex_xfer *const xfer);
+void iccom_dbg_printout_message(const struct iccom_message *const msg);
+#endif
+
+struct iccom_message_storage_channel *__iccom_msg_storage_find_channel(
+		struct iccom_message_storage *storage
+		, unsigned int channel);
+struct iccom_message *__iccom_msg_storage_find_message_in_channel(
+		struct iccom_message_storage_channel *channel_rec
+		, unsigned int msg_id);
+struct iccom_message * __iccom_message_data_clone(
+		struct iccom_message *src);
+ssize_t iccom_test_sysfs_ch_enqueue_msg(
+		struct iccom_dev *iccom, unsigned int ch_id,
+		struct iccom_message *msg);
+bool iccom_test_sysfs_is_ch_present(
+		struct iccom_dev *iccom, unsigned int ch_id);
+static inline struct iccom_message *__iccom_msg_storage_get_message(
+		struct iccom_message_storage *storage
+		, unsigned int channel
+		, unsigned int msg_id);
+struct iccom_message *iccom_msg_storage_get_message(
+		struct iccom_message_storage *storage
+		, unsigned int channel
+		, unsigned int msg_id);
+struct iccom_message *iccom_msg_storage_get_last_message(
+		struct iccom_message_storage *storage
+		, unsigned int channel);
+struct iccom_message *iccom_msg_storage_get_last_unfinalized_message(
+		struct iccom_message_storage *storage
+		, unsigned int channel);
+struct iccom_message *iccom_msg_storage_get_first_message(
+		struct iccom_message_storage *storage
+		, unsigned int channel);
+struct iccom_message *iccom_msg_storage_get_first_ready_message(
+		struct iccom_message_storage *storage
+		, unsigned int channel);
+struct iccom_message *iccom_msg_storage_pop_first_ready_message(
+		struct iccom_message_storage *storage
+		, unsigned int channel);
+struct iccom_message *iccom_msg_storage_pop_message(
+		struct iccom_message_storage *storage
+		, unsigned int channel
+		, unsigned int msg_id);
+int iccom_msg_storage_push_message(
+		struct iccom_message_storage __kernel *storage
+		, struct iccom_message __kernel *msg);
+void iccom_msg_storage_remove_message(struct iccom_message *msg);
+void iccom_msg_storage_collect_garbage(
+		struct iccom_message_storage *storage);
+void iccom_msg_storage_remove_channel(
+		struct iccom_message_storage *storage
+		, unsigned int channel);
+void iccom_msg_storage_clear(struct iccom_message_storage *storage);
+void iccom_msg_storage_free(struct iccom_message_storage *storage);
+int iccom_msg_storage_append_data_to_message(
+	    struct iccom_message_storage *storage
+	    , unsigned int channel, unsigned int msg_id
+	    , void *new_data, size_t new_data_length
+	    , bool final);
+
+int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev);
+int iccom_start(struct iccom_dev *iccom);
+void iccom_print_statistics(struct iccom_dev *iccom);
+bool iccom_is_running(struct iccom_dev *iccom);
+
+void __iccom_stop_xfer_device(struct iccom_dev *iccom);
+int __iccom_bind_xfer_device(struct device *iccom_dev
+		, const struct full_duplex_sym_iface *const full_duplex_if
+		, struct device *full_duplex_device);
+void __iccom_unbind_xfer_device(struct iccom_dev *iccom);
+void iccom_delete(struct iccom_dev *iccom, struct platform_device *pdev);
+
+ssize_t __iccom_test_sysfs_initialize_ch_list(struct iccom_dev *iccom);
+void iccom_test_sysfs_init_ch_msgs_list(
+		struct iccom_test_sysfs_channel * ch_entry);
+void iccom_test_sysfs_ch_del_entry(
+		struct iccom_test_sysfs_channel *ch_entry);
+void iccom_test_sysfs_ch_del(struct iccom_dev *iccom);
+ssize_t iccom_test_sysfs_ch_pop_msg(
+		struct iccom_test_sysfs_channel *ch_entry, char * buf__out,
+		size_t buf_size);
+ssize_t iccom_test_sysfs_ch_pop_msg_by_ch_id(
+		struct iccom_dev *iccom, unsigned int ch_id,
+		char * buf__out, size_t buf_size);
+ssize_t iccom_test_sysfs_ch_add_by_iccom(
+		struct iccom_dev *iccom, unsigned int ch_id);
+ssize_t iccom_test_sysfs_ch_del_by_iccom(
+		struct iccom_dev *iccom, unsigned int ch_id);
+size_t iccom_test_sysfs_trim_buffer(char *buf, size_t size);
+
 
 /* --------------------------- MAIN STRUCTURES --------------------------*/
 
@@ -5196,7 +5313,9 @@ size_t iccom_test_sysfs_trim_buffer(char *buf, size_t size)
 //     > 0: size of data to be showed in user space
 //      <0: negated error code
 static ssize_t version_show(
-		struct class *class, struct class_attribute *attr, char *buf)
+		ICCOM_CLASS_MODIFIER struct class *class
+		, ICCOM_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, char *buf)
 {
 	ICCOM_CHECK_PTR(buf, return -EINVAL);
 	return scnprintf(buf, PAGE_SIZE, "%s", ICCOM_VERSION);
@@ -5219,8 +5338,9 @@ static CLASS_ATTR_RO(version);
 //  count: ok
 //     <0: negated error code
 static ssize_t create_iccom_store(
-		struct class *class, struct class_attribute *attr,
-		const char *buf, size_t count)
+		ICCOM_CLASS_MODIFIER struct class *class
+		, ICCOM_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count)
 {
 	// Allocate one unused ID
 	int device_id = ida_alloc(&iccom_dev_id, GFP_KERNEL);
@@ -5265,8 +5385,9 @@ static CLASS_ATTR_WO(create_iccom);
 //  count: ok
 //     <0: negated error code
 static ssize_t delete_iccom_store(
-		struct class *class, struct class_attribute *attr,
-		const char *buf, size_t count)
+		ICCOM_CLASS_MODIFIER struct class *class
+		, ICCOM_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count)
 {
 	if (count >= PAGE_SIZE) {
 		iccom_warning("Sysfs data can not fit the 0-terminator.");
@@ -5343,7 +5464,9 @@ ATTRIBUTE_GROUPS(iccom_class);
 // @class_groups group holding all the attributes
 static struct class iccom_class = {
 	.name = "iccom",
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,4,0)
 	.owner = THIS_MODULE,
+#endif
 	.class_groups = iccom_class_groups
 };
 

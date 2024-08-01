@@ -23,6 +23,7 @@
 #include <linux/module.h>
 #include <linux/version.h>
 #include <linux/of_device.h>
+#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 
 #include <linux/fd_test_transport.h>
@@ -40,6 +41,14 @@
 // to keep the compatibility with Kernel versions earlier than v5.5
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0)
     #define pr_warning pr_warn
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,4,0)
+	#define FD_TT_CLASS_MODIFIER const
+	#define FD_TT_CLASS_ATTR_MODIFIER const
+#else
+	#define FD_TT_CLASS_MODIFIER
+	#define FD_TT_CLASS_ATTR_MODIFIER
 #endif
 
 #if FD_TT_VERBOSITY >= 1
@@ -154,24 +163,77 @@
 struct ida fd_tt_dev_id;
 
 
+/* ------------- FORWARD STRUCT DECLARATIONS ------*/
+
+struct fd_test_transport_dev;
+
 /* ------------- FORWARD DECLARATIONS -------------*/
 
+void fd_tt_xfer_init(struct full_duplex_xfer *xfer);
+void fd_tt_xfer_free(struct full_duplex_xfer *xfer);
+int fd_tt_update_wire_data(
+		struct fd_test_transport_dev *xfer_device,
+		char *data_transport_to_iccom,
+		size_t data_transport_to_iccom_size);
+int fd_tt_deep_xfer_copy(
+		struct full_duplex_xfer *src,
+		struct full_duplex_xfer *dst);
+int fd_tt_iterate_to_next_xfer_id(
+		struct fd_test_transport_dev *xfer_device);
+int fd_tt_accept_data(
+		struct fd_test_transport_dev* xfer_device,
+		struct __kernel full_duplex_xfer *xfer);
+static void fd_tt_trigger_data_exchange(
+		struct fd_test_transport_dev *xfer_device);
+
 int fd_tt_data_xchange(
-			void __kernel *device,
-			struct __kernel full_duplex_xfer *xfer,
-			bool force_size_change);
+		void __kernel *device,
+		struct __kernel full_duplex_xfer *xfer,
+		bool force_size_change);
 int fd_tt_default_data_update(
-				void __kernel *device,
-				struct full_duplex_xfer *xfer,
-				bool force_size_change);
+		void __kernel *device,
+		struct full_duplex_xfer *xfer,
+		bool force_size_change);
+bool fd_tt_is_running(void __kernel *device);
 int fd_tt_init(
 		void __kernel *device,
 		struct full_duplex_xfer *default_xfer);
+int fd_tt_close(void __kernel *device);
 int fd_tt_reset(
 		void __kernel *device,
 		struct full_duplex_xfer *default_xfer);
-int fd_tt_close(void __kernel *device);
 bool fd_tt_is_running(void __kernel *device);
+
+size_t fd_tt_sysfs_trim_buffer(char *buf, size_t size);
+ssize_t fd_tt_convert_hex_str_to_byte_array(
+		const char *str, const size_t str_len,
+		uint8_t *bytearray__out, size_t out_size);
+ssize_t fd_tt_iccom_convert_byte_array_to_hex_str(
+		char *buf__out, size_t buf_size,
+		const uint8_t *data_iccom_to_transport,
+		const size_t data_iccom_to_transport_size);
+static ssize_t transport_RW_show(
+		struct device *dev, struct device_attribute *attr, char *buf);
+static ssize_t transport_RW_store(
+		struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count);
+static ssize_t transport_ctl_store(
+		struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count);
+static ssize_t create_transport_store(
+		FD_TT_CLASS_MODIFIER struct class *class
+		, FD_TT_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count);
+static ssize_t delete_transport_store(
+		FD_TT_CLASS_MODIFIER struct class *class
+		, FD_TT_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count);
+
+static int fd_tt_probe(struct platform_device *pdev);
+static int fd_tt_remove(struct platform_device *pdev);
+
+static int __init fd_tt_module_init(void);
+static void __exit fd_tt_module_exit(void);
 
 /* -------------- MAIN STRUCTURES -------------*/
 
@@ -1008,8 +1070,9 @@ ATTRIBUTE_GROUPS(fd_test_transport_dev);
 //  count: ok
 //     <0: negated error code
 static ssize_t create_transport_store(
-		struct class *class, struct class_attribute *attr,
-		const char *buf, size_t count)
+		FD_TT_CLASS_MODIFIER struct class *class
+		, FD_TT_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count)
 {
 	// Allocate new unused ID
 	int device_id = ida_alloc(&fd_tt_dev_id,GFP_KERNEL);
@@ -1067,8 +1130,9 @@ static CLASS_ATTR_WO(create_transport);
 //  count: ok
 //     <0: negated error code
 static ssize_t delete_transport_store(
-		struct class *class, struct class_attribute *attr,
-		const char *buf, size_t count)
+		FD_TT_CLASS_MODIFIER struct class *class
+		, FD_TT_CLASS_ATTR_MODIFIER struct class_attribute *attr
+		, const char *buf, size_t count)
 {
 	if (count >= PAGE_SIZE) {
 		fd_tt_warning("Sysfs data can not fit the 0-terminator.");
@@ -1136,7 +1200,9 @@ ATTRIBUTE_GROUPS(fd_tt_class);
 // @class_groups group holding all the attributes
 static struct class fd_tt_class = {
 	.name = "fd_test_transport",
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,4,0)
 	.owner = THIS_MODULE,
+#endif
 	.class_groups = fd_tt_class_groups
 };
 
