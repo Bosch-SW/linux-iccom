@@ -2590,7 +2590,8 @@ invalid_params:
 struct of_device_id iccom_skif_driver_id[] = {
 	{
 		.compatible = "iccom_socket_if",
-	}
+	},
+	{}
 };
 
 // The ICCom socket driver definition
