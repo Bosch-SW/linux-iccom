@@ -55,6 +55,12 @@ class GeneralTest:
         def append_report(self, test_id, test_result):
                 self.tests[test_id] = { "id": test_id, "result": test_result }
 
+        def failed_count(self):
+                failed = 0
+                for (test_id, test_info) in self.tests.items():
+                        failed += 1 if test_info["result"] == False else 0
+                return failed
+
         # Launches the test given by the callable @test_sequencescription:
         #       iccom sk -> send data to iccom
         # @test_sequence can run in two modes
