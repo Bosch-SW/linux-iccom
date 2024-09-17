@@ -1,10 +1,5 @@
 import subprocess
-import zlib
-import time
-import errno
 import os
-import string
-import random
 
 from iccom import iccom_version
 
@@ -12,31 +7,47 @@ import iccom_test
 import iccom_skif_test
 
 def execute_command(command):
-    subprocess.run(command, shell=True)
+    if (subprocess.run(command, shell=True).returncode != 0):
+        raise Exception("Failed to run: %s" % (command,))
+
+class ModulesDeployer:
+    def __init__(self, modules_list):
+        self.mods_list = modules_list
+
+    def deploy_modules(self):
+        for mpath in self.mods_list:
+            print("#### Inserting %s" % (mpath,))
+            execute_command("insmod %s" % (mpath,))
+    
+    def dismiss_modules(self):
+        for mpath in reversed(self.mods_list):
+            print("#### Removing %s" % (mpath,))
+            name = os.path.splitext(os.path.basename(mpath))[0] 
+            execute_command("rmmod %s" % (name,))
+
+    def __enter__(self):
+        self.deploy_modules()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.dismiss_modules()
+        return self
 
 if __name__ == '__main__':
 
-    # Setup
-    print("#### Inserting iccom.ko ...")
-    execute_command("insmod /modules/iccom.ko")
+    tests = []
 
-    print("#### Inserting fd_test_transport.ko ...")
-    execute_command("insmod /modules/fd_test_transport.ko")
+    with ModulesDeployer([
+            "/modules/iccom.ko"
+            , "/modules/fd_test_transport.ko"
+            , "/modules/iccom_socket_if.ko"
+            ]):
 
-    print("#### Inserting iccom_socket_if.ko ...")
-    execute_command("insmod /modules/iccom_socket_if.ko")
+        print("ICCom repository revision: %s" % (iccom_version(None),))
 
-    print("ICCom repository revision: %s" % (iccom_version(None),))
+        # Run tests
+        tests.append(iccom_test.run_tests())
+        tests.append(iccom_skif_test.run_tests())
 
-    # Run tests
-    iccom_results = iccom_test.run_tests()
-    iccom_skif_results = iccom_skif_test.run_tests()
-
-    # Tear Down
-    print("Removing iccom.ko ..")
-    execute_command("rmmod iccom.ko")
-    print("Removing fd_test_transport.ko ..")
-    execute_command("rmmod fd_test_transport.ko")
-
-    iccom_results.print()
-    iccom_skif_results.print()
+    for t in tests:
+         t.print()
