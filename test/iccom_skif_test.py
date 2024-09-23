@@ -217,7 +217,7 @@ def test_iccom_sk_data_comm_with_transport_level(params, get_test_info=False):
 
                 iccom.check_wire_xfer(te.test_transport_name()
                                         , iccom.iccom_package(1, bytearray())
-                                        , iccom.iccom_package(1, bytearray())
+                                        , iccom.iccom_package(0, bytearray())
                                 , None, None, "first data frame")
                 iccom.check_wire_xfer_ack(te.test_transport_name()
                                         , None, None, "first ack frame")
@@ -226,7 +226,7 @@ def test_iccom_sk_data_comm_with_transport_level(params, get_test_info=False):
                 iccom.check_wire_xfer(te.test_transport_name()
                                 , iccom.iccom_package(2
                                         , iccom.iccom_packet(ch, data_rcv, True))
-                                , iccom.iccom_package(2
+                                , iccom.iccom_package(1
                                         , iccom.iccom_packet(ch, data_snd, True))
                                 , None , None, "second data frame")
                 iccom.check_wire_xfer_ack(te.test_transport_name()
@@ -518,7 +518,7 @@ def test_iccom_skif_routing_primitive(params, get_test_info=False):
                 if in_direction == "downwards" and in_ch not in us_ch_list:
                         us_ch_list.append(in_ch)
 
-                transport_frame = 1
+                transport_frame = 0
 
                 try:
                         # getting sockets in us

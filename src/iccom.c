@@ -278,8 +278,10 @@
 // to the other side ICCom.
 #define ICCOM_TECHNICAL_CHANNEL_ID 0
 
-// should be > 0
-#define ICCOM_INITIAL_PACKAGE_ID 1
+// the ID of the very first package being sent
+#define ICCOM_INITIAL_PACKAGE_ID 0
+// keep it negative
+#define ICCOM_PACKAGE_HAVE_NOT_RECEIVED_ID -1
 
 /* --------------------- DATA PACKAGE CONFIGURATION ---------------------*/
 
@@ -920,11 +922,15 @@ struct iccom_error_rec {
 //            need to send the ack package.
 //      If the field is false (implies underlying layer is busy):
 //          * then upon xfer finished we may start next data package xfer.
-// @next_tx_message_id keeps the next outgoing message id. Wraps around.
+// @next_tx_package_id keeps the next outgoing message id. Wraps around.
+//		All values (specifically [0;255]) are valid.
 // @last_rx_package_id the sequence ID of the last package we have
 //      received from the other side. If we receive two packages
 //      with the same sequence ID, than we will drop all but one of the
 //      packages with the same sequence ID.
+//		NOTE: package ID in real packages always runs in range [0;255]
+//			so the value last_rx_package_id == ICCOM_PACKAGE_HAVE_NOT_RECEIVED_ID
+//			which is <0 is used ONLY to indicate "have not received anything yet".
 // @rx_messages the incoming messages storage. Stores completed incoming
 //      messages as well as under construction incoming messages.
 // @work_queue pointer to personal ICCom dedicated work-queue to handle
@@ -976,7 +982,7 @@ struct iccom_dev_private {
 
 	bool data_xfer_stage;
 
-	int next_tx_package_id;
+	uint8_t next_tx_package_id;
 	int last_rx_package_id;
 
 	struct iccom_message_storage rx_messages;
@@ -1148,18 +1154,16 @@ static inline size_t __iccom_package_get_payload_free_space(
 
 // Helper. Sets the package ID. See @iccom_package description.
 static inline void __iccom_package_set_id(
-		struct iccom_package *package, int id)
+		struct iccom_package *package, uint8_t id)
 {
 	*(package->data
-		+ ICCOM_PACKAGE_PAYLOAD_DATA_LENGTH_FIELD_SIZE_BYTES)
-			= (uint8_t)id;
+		+ ICCOM_PACKAGE_PAYLOAD_DATA_LENGTH_FIELD_SIZE_BYTES) = id;
 }
 
 // Helper. Gets the package ID. See @iccom_package description.
-static inline int __iccom_package_get_id(
-		struct iccom_package *package)
+static inline uint8_t __iccom_package_get_id(struct iccom_package *package)
 {
-	return (int)(*(package->data
+	return (uint8_t)(*(package->data
 			+ ICCOM_PACKAGE_PAYLOAD_DATA_LENGTH_FIELD_SIZE_BYTES));
 }
 
@@ -3433,13 +3437,10 @@ static inline void __iccom_cancel_work_sync(
 }
 
 // Helper. Provides next outgoing package id.
-static int __iccom_get_next_package_id(struct iccom_dev *iccom)
+static uint8_t __iccom_get_next_package_id(struct iccom_dev *iccom)
 {
-	int pkg_id = iccom->p->next_tx_package_id++;
-	if (iccom->p->next_tx_package_id <= 0) {
-		iccom->p->next_tx_package_id = ICCOM_INITIAL_PACKAGE_ID;
-	}
-	return pkg_id;
+	// we wrap up uint8_t, as designed
+	return iccom->p->next_tx_package_id++;
 }
 
 // Helper. Returns true if we have at least one package in TX list.
@@ -3489,8 +3490,7 @@ static int __iccom_enqueue_new_tx_data_package(struct iccom_dev *iccom)
 		return res;
 	}
 
-	int package_id = __iccom_get_next_package_id(iccom);
-	__iccom_package_set_id(new_package, package_id);
+	__iccom_package_set_id(new_package, __iccom_get_next_package_id(iccom));
 
 	list_add_tail(&new_package->list_anchor
 		      , &iccom->p->tx_data_packages_head);
@@ -3694,8 +3694,7 @@ static bool __iccom_queue_step_forward(struct iccom_dev *iccom)
 		= __iccom_get_first_tx_package(iccom);
 
 	// set this package empty and update with new id
-	int next_id = __iccom_get_next_package_id(iccom);
-	__iccom_package_set_id(delivered_package, next_id);
+	__iccom_package_set_id(delivered_package, __iccom_get_next_package_id(iccom));
 	__iccom_package_make_empty(delivered_package);
 
 	have_data = false;
@@ -4165,8 +4164,8 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 		// package is selfconsistent, but we already received
 		// and processed it successfully, then we will say that
 		// this package is (already) OK
-		int rx_pkg_id = __iccom_package_get_id(&rx_pkg);
-		if (rx_pkg_id == iccom->p->last_rx_package_id) {
+		const uint8_t rx_pkg_id = __iccom_package_get_id(&rx_pkg);
+		if ((int)rx_pkg_id == iccom->p->last_rx_package_id) {
 			__iccom_fillup_ack_xfer(iccom, &iccom->p->xfer, true);
 			iccom->p->statistics.packages_duplicated_received += 1;
 			goto finalize;
@@ -4184,7 +4183,7 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 
 		// package parsing was OK
 		iccom->p->statistics.packages_received_ok++;
-		iccom->p->last_rx_package_id = rx_pkg_id;
+		iccom->p->last_rx_package_id = (int)rx_pkg_id;
 		__iccom_fillup_ack_xfer(iccom, &iccom->p->xfer, true);
 		goto finalize;
 	}
@@ -4813,7 +4812,7 @@ int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
 
 	// initialization sequence
 	int res = 0;
-	iccom->p = kmalloc(sizeof(struct iccom_dev_private), GFP_KERNEL);
+	iccom->p = kzalloc(sizeof(struct iccom_dev_private), GFP_KERNEL);
 	if (!iccom->p) {
 		iccom_err("No memory.");
 		res = -ENOMEM;
@@ -4838,6 +4837,8 @@ int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
 		iccom_err("Could not initialize packages storage.");
 		goto free_msg_storage;
 	}
+
+	iccom->p->last_rx_package_id = ICCOM_PACKAGE_HAVE_NOT_RECEIVED_ID;
 
 	// init TX ack/nack data
 	iccom->p->ack_val = ICCOM_PACKAGE_ACK_VALUE;

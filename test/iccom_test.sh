@@ -86,7 +86,7 @@ iccom_data_exchange_to_transport_with_iccom_data_with_transport_data() {
     iccom_send ${iccom_dev} ${channel} "Who are you?"
 
     local send_data=000001ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb8c8b346
-    local exp_data=000001ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb8c8b346
+    local exp_data=000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff2bc7740c
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
 
     send_data=d0
@@ -94,7 +94,7 @@ iccom_data_exchange_to_transport_with_iccom_data_with_transport_data() {
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
 
     send_data=000d02000900814920616d204c756973ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff513d7dd4
-    exp_data=001002000c008157686f2061726520796f753fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff788d44db
+    exp_data=001001000c008157686f2061726520796f753fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffcd9d0d04
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
 
     send_data=d0

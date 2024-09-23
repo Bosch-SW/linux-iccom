@@ -357,7 +357,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(
             # Default xfer
             check_wire_xfer(te.test_transport_name()
                             , iccom_package(1, bytearray())
-                            , iccom_package(1, bytearray())
+                            , iccom_package(0, bytearray())
                             , None, None, "first data frame")
             check_wire_xfer_ack(te.test_transport_name()
                                 , None, None, "first ack frame")
@@ -365,7 +365,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data(
             # Actual data xfer
             check_wire_xfer(te.test_transport_name()
                             , iccom_package(2, iccom_packet(1, bytearray(b"I am Luis"), True))
-                            , iccom_package(2, iccom_packet(1, bytearray(b"Who are you?"), True))
+                            , iccom_package(1, iccom_packet(1, bytearray(b"Who are you?"), True))
                             , None , None, "second data frame")
             check_wire_xfer_ack(te.test_transport_name()
                                 , None, None, "second ack frame")
@@ -389,7 +389,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
             # Do (Default xfer) Data Exchange + ACK
             check_wire_xfer(te.test_transport_name()
                             , iccom_package(1, bytearray())
-                            , iccom_package(1, bytearray())
+                            , iccom_package(0, bytearray())
                             , None, None, "first data frame")
             check_wire_xfer_ack(te.test_transport_name()
                                 , None, None, "first ack frame")
@@ -397,7 +397,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
             # Do (Default xfer) Data Exchange + ACK
             check_wire_xfer(te.test_transport_name()
                             , iccom_package(2, bytearray())
-                            , iccom_package(2, bytearray())
+                            , iccom_package(1, bytearray())
                             , None, None, "second data frame")
             check_wire_xfer_ack(te.test_transport_name()
                                 , None, None, "second ack frame")
@@ -423,7 +423,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
             # Do (Default xfer) Data Exchange + ACK
             check_wire_xfer(te.test_transport_name()
                             , iccom_package(1, bytearray())
-                            , iccom_package(1, bytearray())
+                            , iccom_package(0, bytearray())
                             , None, None, "first data frame")
             check_wire_xfer_ack(te.test_transport_name()
                                 , None, None, "first ack frame")
@@ -433,7 +433,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
             broken_package[1] = 0x02
             check_wire_xfer(te.test_transport_name()
                             , broken_package
-                            , iccom_package(2, iccom_packet(1, bytearray(b"Who are you?"), True))
+                            , iccom_package(1, iccom_packet(1, bytearray(b"Who are you?"), True))
                             , None , None, "second data frame")
             check_wire_xfer(te.test_transport_name()
                             , iccom_ack_package()
@@ -462,7 +462,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
             # Do (Default xfer) Data Exchange + NACK
             check_wire_xfer(te.test_transport_name()
                             , iccom_package(1, bytearray())
-                            , iccom_package(1, bytearray())
+                            , iccom_package(0, bytearray())
                             , None, None, "first data frame")
             check_wire_xfer_ack(te.test_transport_name()
                                 , None, None, "first ack frame")
@@ -471,7 +471,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
             # received it properly
             check_wire_xfer(te.test_transport_name()
                     , iccom_package(2, bytearray())
-                    , iccom_package(2, iccom_packet(1000
+                    , iccom_package(1, iccom_packet(1000
                                                     , bytearray(b"Is there anybody there?")
                                                     , True))
                     , None, "second data frame")
@@ -483,7 +483,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
             # ICCom must repeat the transmission of the data
             check_wire_xfer(te.test_transport_name()
                     , iccom_package(2, bytearray())
-                    , iccom_package(2, iccom_packet(1000
+                    , iccom_package(1, iccom_packet(1000
                                                     , bytearray(b"Is there anybody there?")
                                                     , True))
                     , None, "second data frame")
@@ -550,7 +550,7 @@ def iccom_stress_data_communication_with_different_channels(
 
             gen_char_size = 10
             number_of_msgs = 500
-            sequence_number = 1
+            sequence_number = 0
             number_of_channels = 10
 
             for ch in range(1, number_of_channels + 1):
@@ -639,6 +639,66 @@ def iccom_data_sysfs_fd_test_transport_RW_creation_deletion_checkup(
 
             check_sysfs_file_presence_expectation(transport_RW_file , False)
 
+def iccom_initial_package(params, get_test_info=False):
+
+        if (get_test_info):
+            return { "test_description": ("package on wire -> newly created iccom"
+                                          ", allows to ensure that none of packages"
+                                          " is lost at the very beginning of comm.")
+                     , "test_id": "initial_package" }
+
+        ch = 100
+
+        # checking all initial packages we have for now
+        for init_pkg_id in range(0, 256):
+
+            with IccomTestEnv() as te:
+
+                sequence_number = init_pkg_id
+
+                create_iccom_sysfs_channel(te.iccom_name(), 100, None)
+                create_transport_device_RW_files(te.test_transport_name(), None)
+
+                question_str = "the fist package"
+                question_b = question_str.encode('utf-8')
+
+                answer_str = "really it is"
+                answer_b = answer_str.encode('utf-8')
+
+                print("Test channel: " + str(ch))
+                print("  * iccom->wire msg: " + question_b.hex())
+                print("  * wire->iccom msg: " + answer_b.hex())
+
+                # Send a message from ICCOM to Full Duplex Test Transport via the channel
+                iccom_sysfs_send(te.iccom_name(), ch, question_str, None)
+
+                # Transfer
+                # NOTE: new ICCom will start with package ID = 0
+                check_wire_xfer(te.test_transport_name()
+                                , iccom_package(sequence_number
+                                                , iccom_packet(ch, bytearray(answer_b)
+                                                        , True))
+                                , iccom_package(0, bytearray())
+                                , None, None, "initial data frame")
+
+                check_wire_xfer_ack(te.test_transport_name(), None, None, "ack frame")
+
+                sequence_number = (sequence_number + 1) % 0x100
+
+                # NOTE: second ICCom  package ID = 1
+                check_wire_xfer(te.test_transport_name()
+                                , iccom_package(sequence_number, bytearray())
+                                , iccom_package(1, iccom_packet(ch, bytearray(question_b)
+                                                                , True)) 
+                                , None, None, "initial data frame")
+
+                check_wire_xfer_ack(te.test_transport_name(), None, None, "ack frame")
+
+                sequence_number = (sequence_number + 1) % 0x100
+
+                # Check channel data
+                check_ch_data(te.iccom_name(), ch, answer_str, None)
+
 class IccomTester(GeneralTest):
 
     def __init__(self, skip_list=None):
@@ -669,6 +729,8 @@ class IccomTester(GeneralTest):
             "number_of_devices": 10
         })
 
+        self.test(iccom_initial_package, {})
+
 def run_tests():
      
     # tester = IccomTester(skip_list=[
@@ -681,6 +743,7 @@ def run_tests():
     #     , "random_messages_over_various_channels"
     #     , "iccom_creation_deletion"
     #     , "iccom_test_transport_creation_deletion"
+    #     , "initial_package"
     # ])
 
     tester = IccomTester()
