@@ -1,6 +1,12 @@
+# NOTE: Docker Server to fetch docker images
+ARG DOCKER_SERVER
+
+# defines the tag of the image we should base on
+ARG DOCKER_IN_TAG
+
 # NOTE: Default build for the iccom modules
 #       with its different variants
-FROM bosch-linux-full-duplex-interface:latest AS iccom
+FROM ${DOCKER_SERVER}/bosch-linux-full-duplex-interface:${DOCKER_IN_TAG} AS iccom
 
 # Base (default) version
 ARG kernel_source_dir_x86=/repos/linux_x86/
