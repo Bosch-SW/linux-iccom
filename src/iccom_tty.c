@@ -33,7 +33,9 @@
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,16,0)
 #include <linux/container_of.h>
+#endif
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
 #include <linux/stringify.h>
@@ -173,7 +175,11 @@ struct iccom_tty_dev {
 
 /*---------------------- PRE DECLARATIONS ----------------------------*/
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,14,0)
 static unsigned int ictty_tty_write_room(struct tty_struct *tty);
+#else
+static int ictty_tty_write_room(struct tty_struct *tty);
+#endif
 static int ictty_install(struct tty_driver *driver, struct tty_struct *tty);
 static int ictty_tty_open(struct tty_struct *tty, struct file *filp);
 static void ictty_tty_close(struct tty_struct *tty, struct file *filp);
@@ -267,7 +273,11 @@ static bool __iccom_tty_msg_rx_callback(
 	return false;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,14,0)
 static unsigned int ictty_tty_write_room(struct tty_struct *tty)
+#else
+static int ictty_tty_write_room(struct tty_struct *tty)
+#endif
 {
 	ICTTY_CHECK_PTR_RAW(tty, return 0);
 	ICTTY_CHECK_PTR_RAW(tty->dev, return 0);
