@@ -322,23 +322,23 @@ def delete_transport_device_RW_files(transport_dev, err_expectation):
 #   (packets data)
 #
 # RETURNS: the new bytearray - a complete package ready to sent
-def iccom_package(package_sequential_number, package_payload):
-    PACKAGE_SIZE_BYTES = 64
+def iccom_package(package_sequential_number, package_payload
+                  , package_size_bytes = 64):
     CRC32_SIZE_BYTES = 4
 
     if (package_sequential_number > 0xff) or (package_sequential_number < 0):
         raise ValueError("The package_sequential_number must fit the unsigned"
                          " byte in size, but now given: %s"
                          % (str(package_sequential_number)))
-    if (len(package_payload) > PACKAGE_SIZE_BYTES - CRC32_SIZE_BYTES):
+    if (len(package_payload) > package_size_bytes - CRC32_SIZE_BYTES):
         raise RuntimeError("The package payload is too big: %d."
                            " It can me max %d bytes size."
-                           % (len(package_payload), PACKAGE_SIZE_BYTES - CRC32_SIZE_BYTES))
+                           % (len(package_payload), package_size_bytes - CRC32_SIZE_BYTES))
 
     package_header = bytearray((len(package_payload)).to_bytes(2, "big")
                                + package_sequential_number.to_bytes(1, "little"))
 
-    padding_size = (PACKAGE_SIZE_BYTES - len(package_header)
+    padding_size = (package_size_bytes - len(package_header)
                     - len(package_payload) - CRC32_SIZE_BYTES)
 
     padded_package = package_header + package_payload + bytearray(padding_size * b"\xff")
