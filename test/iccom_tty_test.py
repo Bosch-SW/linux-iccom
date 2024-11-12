@@ -294,6 +294,66 @@ def test_tty_multiple_read(params, get_test_info=False):
 
                 delete_transport_device_RW_files(te.test_transport_name(), None)
 
+def test_tty_multiple_open_close_same_dev(params, get_test_info=False):
+        if (get_test_info):
+            return { "test_description": "multiple open&close of the same dev"
+                     , "test_id": (params["test_id"] if "test_id" in params
+                                   else "tty_multiple_reopen")
+                     , "applicable": IccomTty.dynamic_dt_supported() }
+
+        IccomTty.ensure_dynamic_dt()
+
+        with IccomTestEnv() as te:
+            with IccomTty(te.get_one_iccom_name()
+                          , params["tty_iccom_ch"]
+                          , params["tty_number"]) as tty:
+                for i in range(params["reopens_count"]):
+                    tty.tty.close()
+                    tty.tty.open()
+                    tty.tty.flush()
+
+def test_tty_multiple_open_read_close_same_dev(params, get_test_info=False):
+        if (get_test_info):
+            return { "test_description": "multiple open&read&close of the same dev"
+                     , "test_id": (params["test_id"] if "test_id" in params
+                                   else "tty_multiple_reopen_and_read")
+                     , "applicable": IccomTty.dynamic_dt_supported() }
+
+        IccomTty.ensure_dynamic_dt()
+
+        with IccomTestEnv() as te:
+            with IccomTty(te.get_one_iccom_name()
+                          , params["tty_iccom_ch"]
+                          , params["tty_number"]) as tty:
+
+                create_transport_device_RW_files(te.test_transport_name(), None)
+
+                for i in range(params["reopens_count"]):
+
+                    for i in range(params["msgs_count"]):
+
+                        msg_size = random.randint(1, params["msg_max_size"])
+
+                        base_str = ''.join(random.choices(string.ascii_uppercase +
+                                                    string.digits, k=msg_size))
+
+                        data = base_str.encode('UTF-8')
+
+                        te.iccom_simulate_incoming(params["tty_iccom_ch"], data)
+                        tty_data = tty.read()
+                        if tty_data != data:
+                            raise Exception("the userland read from TTY differs from expected:\n"
+                                            "  * actual  : \"%s\"\n"
+                                            "  * expected: \"%s\"\n"
+                                            % (tty_data, data))
+
+
+                    tty.tty.close()
+                    tty.tty.open()
+                    tty.tty.flush()
+
+                delete_transport_device_RW_files(te.test_transport_name(), None)
+
 class IccomTtyTester(GeneralTest):
 
         def __init__(self, skip_list=None):
@@ -362,6 +422,24 @@ class IccomTtyTester(GeneralTest):
                             , "msg_max_size": 40
                             , "append_nl": True
                             , "test_id": "test_tty_basic_read_100msgs_up_to_40chars_with_nl"
+                        })
+                self.test(test_tty_multiple_open_close_same_dev
+                        , {
+                            "tty_iccom_ch": 2874
+                            , "tty_number": 4
+                            , "reopens_count": 10
+                            , "msgs_count": 10
+                            , "msg_max_size": 40
+                            , "test_id": "test_tty_reopening"
+                        })
+                self.test(test_tty_multiple_open_read_close_same_dev
+                        , {
+                            "tty_iccom_ch": 2874
+                            , "tty_number": 4
+                            , "reopens_count": 10
+                            , "msgs_count": 10
+                            , "msg_max_size": 40
+                            , "test_id": "test_tty_reopen_and_read"
                         })
 
 def run_tests():
