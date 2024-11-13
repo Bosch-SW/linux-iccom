@@ -178,7 +178,6 @@ static int ictty_install(struct tty_driver *driver, struct tty_struct *tty);
 static int ictty_tty_open(struct tty_struct *tty, struct file *filp);
 static void ictty_tty_close(struct tty_struct *tty, struct file *filp);
 static void ictty_tty_hangup(struct tty_struct *tty);
-static void ictty_tty_cleanup(struct tty_struct *tty);
 
 void ictty_tty_port_destruct(struct tty_port *port);
 
@@ -354,21 +353,6 @@ static void ictty_tty_hangup(struct tty_struct *tty)
 		return ;
 	}
 	tty_port_hangup(tty->port);
-}
-
-static void ictty_tty_cleanup(struct tty_struct *tty)
-{
-	if (IS_ERR_OR_NULL(tty)) {
-		pr_err("iccom_tty: failed to cleanup tty: tty is missing");
-		return ;
-	}
-	if (IS_ERR_OR_NULL(tty->port)) {
-		pr_err("iccom_tty: failed to cleanup tty: tty port is missing");
-		return ;
-	}
-
-	tty_port_put(tty->port);
-	tty->port = NULL;
 }
 
 void ictty_tty_port_destruct(struct tty_port *port)
@@ -711,7 +695,6 @@ static const struct tty_operations ictty_tty_ops = {
 	.write		= ictty_tty_write,
 	.write_room	= ictty_tty_write_room,
 	.hangup		= ictty_tty_hangup,
-	.cleanup	= ictty_tty_cleanup,
 };
 
 static const struct tty_port_operations ictty_tty_port_ops = {
@@ -899,11 +882,8 @@ static int ictty_probe(struct platform_device *pdev)
 	ictty->iccom = iccom;
 	ictty->iccom_ch = tty_channel;
 	ictty->max_msg_size = (size_t)max_msg_size;
+	// port refcount will be 1 after init
 	tty_port_init(&ictty->tty_port);
-	// we don't allow port to be destroyed indepenedently of the ictty
-///////// @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ CHECK UP!!!!
-	tty_port_get(&ictty->tty_port); ///////// @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ CHECK UP!!!!
-///////// @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ CHECK UP!!!!
 	ictty->tty_port.ops = &ictty_tty_port_ops;
 	ictty->base_pdev = pdev;
 	ictty->tty_number = tty_number;
