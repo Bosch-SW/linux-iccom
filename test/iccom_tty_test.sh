@@ -46,8 +46,16 @@ check_iccom_tty_basic_io() {
     echo "hello from tty" > "/dev/ttyICCOM${tty_number}"
 
     # empty
+    # str(iccom.iccom_package(3, bytearray(), 64).hex())
     local send_data=000003ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9ed73dd3
+    # str(iccom.iccom_package(2, bytearray(), 64).hex())
     local exp_data=000002ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0dd8fa99
+    if [ $(cat "/sys/devices/platform/${iccom_dev}/data_package_size") -eq "256" ]; then
+        # str(iccom.iccom_package(3, bytearray(), 256).hex())
+        send_data=000003fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffdd83d98
+        # str(iccom.iccom_package(2, bytearray(), 256).hex())
+        exp_data=000002ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff5e08a05d
+    fi
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
 
     send_data=d0
@@ -62,8 +70,16 @@ check_iccom_tty_basic_io() {
     } &
 
     # actual data
+    # str(iccom.iccom_package(4, iccom.iccom_packet(17435, "hello from wire\n".encode("utf-8"), True), 64).hex())
     send_data=0014040010889b68656c6c6f2066726f6d20776972650affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc4382b65
+    # str(iccom.iccom_package(3, iccom.iccom_packet(17435, "hello from tty\n".encode("utf-8"), True), 64).hex()) 
     exp_data=001303000f889b68656c6c6f2066726f6d207474790affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff97cc8b97
+    if [ $(cat "/sys/devices/platform/${iccom_dev}/data_package_size") -eq "256" ]; then
+        # str(iccom.iccom_package(4, iccom.iccom_packet(17435, "hello from wire\n".encode("utf-8"), True), 256).hex())
+        send_data=0014040010889b68656c6c6f2066726f6d20776972650affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc19f5fad
+        # str(iccom.iccom_package(3, iccom.iccom_packet(17435, "hello from tty\n".encode("utf-8"), True), 256).hex()) 
+        exp_data=001303000f889b68656c6c6f2066726f6d207474790affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff2b1aea69
+    fi
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
 
     send_data=d0

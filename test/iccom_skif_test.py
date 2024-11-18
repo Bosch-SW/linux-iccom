@@ -216,8 +216,8 @@ def test_iccom_sk_data_comm_with_transport_level(params, get_test_info=False):
                 sock.send(create_netlink_msg(data_snd, 1))
 
                 iccom.check_wire_xfer(te.test_transport_name()
-                                        , iccom.iccom_package(1, bytearray())
-                                        , iccom.iccom_package(0, bytearray())
+                                        , iccom.iccom_package(1, bytearray(), te.curr_dpkg_size())
+                                        , iccom.iccom_package(0, bytearray(), te.curr_dpkg_size())
                                 , None, None, "first data frame")
                 iccom.check_wire_xfer_ack(te.test_transport_name()
                                         , None, None, "first ack frame")
@@ -225,9 +225,9 @@ def test_iccom_sk_data_comm_with_transport_level(params, get_test_info=False):
                 # Actual data xfer
                 iccom.check_wire_xfer(te.test_transport_name()
                                 , iccom.iccom_package(2
-                                        , iccom.iccom_packet(ch, data_rcv, True))
+                                        , iccom.iccom_packet(ch, data_rcv, True), te.curr_dpkg_size())
                                 , iccom.iccom_package(1
-                                        , iccom.iccom_packet(ch, data_snd, True))
+                                        , iccom.iccom_packet(ch, data_snd, True), te.curr_dpkg_size())
                                 , None , None, "second data frame")
                 iccom.check_wire_xfer_ack(te.test_transport_name()
                                 , None, None, "second ack frame")
@@ -370,8 +370,8 @@ def __routing_primitive_test_helper(
 
                 # idle first xfer
                 iccom.check_wire_xfer(te.test_transport_name()
-                                , iccom.iccom_package(transport_frame, bytearray())
-                                , iccom.iccom_package(transport_frame, bytearray())
+                                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
+                                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
                                 , None, None, "idle prerouting data frame")
                 iccom.check_wire_xfer_ack(te.test_transport_name()
                                         , None, None, "idle prerouting ack frame")
@@ -380,9 +380,9 @@ def __routing_primitive_test_helper(
                 # actual data xfer
                 iccom.check_wire_xfer(te.test_transport_name()
                         , iccom.iccom_package(transport_frame
-                                        , iccom.iccom_packet(in_ch, msg_data, True))
+                                        , iccom.iccom_packet(in_ch, msg_data, True), te.curr_dpkg_size())
                         , iccom.iccom_package(transport_frame
-                                        , bytearray())
+                                        , bytearray(), te.curr_dpkg_size())
                         , None , None, "prerouting data frame")
                 iccom.check_wire_xfer_ack(te.test_transport_name()
                                         , None, None, "prerouting ack frame")
@@ -428,16 +428,16 @@ def __routing_primitive_test_helper(
         # communication here from scratch
         if in_direction == "downwards":
                 iccom.check_wire_xfer(te.test_transport_name()
-                                , iccom.iccom_package(transport_frame, bytearray())
-                                , iccom.iccom_package(transport_frame, bytearray())
+                                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
+                                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
                                 , None, None, "idle data frame")
                 iccom.check_wire_xfer_ack(te.test_transport_name()
                                         , None, None, "idle ack frame")
                 transport_frame = (transport_frame + 1) % 0x100
 
         iccom.check_wire_xfer(te.test_transport_name()
-                , iccom.iccom_package(transport_frame, bytearray())
-                , iccom.iccom_package(transport_frame, expected_wire_data)
+                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
+                , iccom.iccom_package(transport_frame, expected_wire_data, te.curr_dpkg_size())
                 , None , None, "routed data frame")
         iccom.check_wire_xfer_ack(te.test_transport_name()
                                 , None, None, "routed ack frame")

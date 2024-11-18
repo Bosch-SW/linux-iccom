@@ -18,6 +18,7 @@ class IccomTestEnv:
                self.iccom_dev_name = None
                self.iccom_skif_dev_name = None
                self.iccom_transport_dev_name = None
+               self.dpkg_size = None
 
                self.iccom_dev_type = "iccom"
                self.iccom_skif_dev_type = "iccom_socket_if"
@@ -143,8 +144,8 @@ class IccomTestEnv:
                         , iccom_package(self.inbound_package_num
                                         , iccom_packet(channel
                                                 , data
-                                                , True))
-                        , iccom_package(self.outbound_package_num, bytearray())
+                                                , True), self.curr_dpkg_size())
+                        , iccom_package(self.outbound_package_num, bytearray(), self.curr_dpkg_size())
                         , None, "single data frame")
                 check_wire_xfer(self.test_transport_name()
                         , iccom_ack_package()
@@ -160,9 +161,9 @@ class IccomTestEnv:
                 # Do (Default xfer) Data Exchange + NACK
                 check_wire_xfer(self.test_transport_name()
                                 , iccom_package(self.inbound_package_num
-                                                , bytearray())
+                                                , bytearray(), self.curr_dpkg_size())
                                 , iccom_package(self.outbound_package_num
-                                                , bytearray())
+                                                , bytearray(), self.curr_dpkg_size())
                                 , None, None, "first data frame")
                 check_wire_xfer_ack(self.test_transport_name()
                                         , None, None, "first ack frame")
@@ -174,11 +175,11 @@ class IccomTestEnv:
                 # received it properly
                 check_wire_xfer(self.test_transport_name()
                         , iccom_package(self.inbound_package_num
-                                        , bytearray())
+                                        , bytearray(), self.curr_dpkg_size())
                         , iccom_package(self.outbound_package_num
                                         , iccom_packet(channel
                                                 , data
-                                                , True))
+                                                , True), self.curr_dpkg_size())
                         , None, "second data frame")
                 check_wire_xfer(self.test_transport_name()
                         , iccom_ack_package()
@@ -192,4 +193,12 @@ class IccomTestEnv:
                 with open(fn, "r") as statistics:
                         for line in statistics.readlines():
                                 print("    | " + line)
+        
+        def curr_dpkg_size(self, refresh=False):
+                if self.dpkg_size is None or refresh:
+                        fn = "/sys/devices/platform/" + self.get_one_iccom_name() + "/data_package_size"
+                        with open(fn, "r") as f:
+                                self.dpkg_size = int(f.readline())
+                
+                return self.dpkg_size
 

@@ -5678,8 +5678,25 @@ static ssize_t statistics_show(
 
 	return len;
 }
-
 static DEVICE_ATTR_RO(statistics);
+
+// The size of the data package currently used, in bytes
+static ssize_t data_package_size_show(
+		struct device *dev, struct device_attribute *attr, char *buf)
+{
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
+
+	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
+	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -ENODEV);
+
+	size_t len = (size_t)scnprintf(buf, PAGE_SIZE,
+			"%u\n", ICCOM_DEFAULT_DATA_XFER_SIZE_BYTES);
+
+	return len;
+}
+static DEVICE_ATTR_RO(data_package_size);
 
 // The sysfs channels_RW_show function get's triggered
 // whenever from userspace one wants to read the sysfs
@@ -5840,6 +5857,7 @@ static struct attribute *iccom_dev_attrs[] = {
 	&dev_attr_statistics.attr,
 	&dev_attr_channels_ctl.attr,
 	&dev_attr_channels_RW.attr,
+	&dev_attr_data_package_size.attr,
 	NULL,
 };
 

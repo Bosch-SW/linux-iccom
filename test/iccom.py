@@ -320,6 +320,7 @@ def delete_transport_device_RW_files(transport_dev, err_expectation):
 #   (unsigned byte in size)
 # @package_payload the bytearray of the package payload part
 #   (packets data)
+# @package_size_bytes the TOTAL size of the package to generate.
 #
 # RETURNS: the new bytearray - a complete package ready to sent
 def iccom_package(package_sequential_number, package_payload

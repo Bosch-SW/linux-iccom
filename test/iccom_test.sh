@@ -84,16 +84,33 @@ iccom_data_exchange_to_transport_with_iccom_data_with_transport_data() {
     create_transport_device_RW_files ${transport_dev}
     iccom_send ${iccom_dev} ${channel} "Who are you?"
 
+    # str(iccom.iccom_package(1, bytearray(), 64).hex())
     local send_data=000001ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb8c8b346
+    # str(iccom.iccom_package(0, bytearray(), 64).hex())
     local exp_data=000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff2bc7740c
+    if [ $(cat "/sys/devices/platform/${iccom_dev}/data_package_size") -eq "256" ]; then
+        # str(iccom.iccom_package(1, bytearray(), 256).hex())
+        send_data=000001fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa7f77c8
+        # str(iccom.iccom_package(0, bytearray(), 256).hex())
+        exp_data=000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff59afea0d
+    fi
+
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
 
     send_data=d0
     exp_data=d0
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
 
-    send_data=000d02000900814920616d204c756973ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff513d7dd4
+    # str(iccom.iccom_package(2, iccom.iccom_packet(1, "I am I".encode("utf-8"), True), 64).hex()) 
+    send_data=000a02000600814920616d2049ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff239a326a
+    # str(iccom.iccom_package(1, iccom.iccom_packet(1, "Who are you?".encode("utf-8"), True), 64).hex())
     exp_data=001001000c008157686f2061726520796f753fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffcd9d0d04
+    if [ $(cat "/sys/devices/platform/${iccom_dev}/data_package_size") -eq "256" ]; then
+        # str(iccom.iccom_package(2, iccom.iccom_packet(1, "I am I".encode("utf-8"), True), 256).hex())
+        send_data=000a02000600814920616d2049ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa3422ca3
+        # str(iccom.iccom_package(1, iccom.iccom_packet(1, "Who are you?".encode("utf-8"), True), 256).hex())
+        exp_data=001001000c008157686f2061726520796f753ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffb1239c5
+    fi
     check_wire_xfer ${iccom_dev} ${transport_dev} ${channel} ${send_data} ${exp_data}
 
     send_data=d0
