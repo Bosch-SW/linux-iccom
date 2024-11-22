@@ -364,6 +364,35 @@ its latency and bandwidth. It would be a nice extension to ICCom.
 
 # What about testing?
 
+## Code testing and CI
+
+TLDR;
+
+The first and main way to test the iccom modules themselves are to run
+the Docker-driven tests. The big picture of it:
+* one needs a docker image for Linux modules testing (not published, yet)
+* when this docker image is available, then just run
+  `KVER=v6.1 make test`
+  from the iccom repo root, note, the `KVER` can be set to any kernel
+  tag available (when corresponding base docker image is at hand).
+
+This will start the docker image for given kernel version, build
+all relevant ICCom modules inside, and then run all available tests
+in the Qemu VM inside the docker container. At the end one will get
+a report regarding the tests for each Qemu run.
+
+For example, if one needs to ensure that ICCom is fine for a set of
+various kernels (various different configurations also can be used,
+see the Makefile for details), one can run something like this:
+
+```sh
+KVER=v5.4 make test
+KVER=v6.1 make test
+KVER=v6.9 make test
+```
+
+## Modules based testing inside kernel (more legacy approach)
+
 ICCom comes with two dedicated testing modules which provide quite
 exhaustive ICCom module testing abilities.
 
