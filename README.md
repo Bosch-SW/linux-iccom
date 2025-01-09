@@ -455,6 +455,10 @@ Sysfs functionalities include:
 
 ![ICCom Sysfs Structure](docs/assets/iccom_sysfs_structure.png)
 
+# ICCom class sysfs attributes
+
+Here the ICCom class attributes are listed.
+
 Create/Delete ICCom devices
 ```
 # Create /sys/devices/platform/iccom.0
@@ -464,6 +468,25 @@ sudo sh -c "echo > /sys/class/iccom/create_iccom"
 sudo sh -c "echo iccom.0 > /sys/class/iccom/delete_iccom"
 ```
 
+# ICCom device instance sysfs attributes
+
+Here you will find some useful sysfs attributes of the ICCom device instance
+which might be helpful for configuring, tweaking and debugging.
+
+To get the data package size for the specific device (in bytes):
+```
+# provides current data package size in bytes for
+# given ICCom instance (in this case it is iccom.0 instance).
+cat /sys/devices/platform/iccom.0/data_package_size"
+```
+
+# Full Duplex test transport class sysfs attributes
+
+Full Duplex test transport is needed only to test the ICCom stack
+end-to-end communication by looping back its bottom side toward the
+user space via sysfs. Note: it is intended only and only for debugging
+and testing purposes.
+
 Create Full Duplex Test Transport devices
 ```
 # Create /sys/devices/platform/fd_test_transport.0
@@ -472,6 +495,8 @@ sudo sh -c "echo > /sys/class/fd_test_transport/create_transport"
 # Delete /sys/devices/platform/fd_test_transport.0
 sudo sh -c "echo fd_test_transport.0 > /sys/class/fd_test_transport/delete_transport"
 ```
+
+# Manual stack creation and communication simulation via sysfs
 
 Link Full Duplex Test Transport to iccom devices
 ```
