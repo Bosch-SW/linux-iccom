@@ -4328,6 +4328,20 @@ static inline void __iccom_statistics_init(struct iccom_dev *iccom)
 	atomic_long_set(&iccom->p->statistics.messages_ready_in_storage, 0);
 }
 
+// Handles the iccom ctl channel messages. Those messages
+// include protocol negotiations messages, embedded
+// ack messages, etc..
+//
+// @channel must always be ICCOM_CTL_CHANNEL.
+// @consumer_data points to iccom_dev.
+static bool __iccom_ctl_msg_handler(unsigned int channel
+                  , void *msg_data, size_t msg_len
+                  , void *consumer_data)
+{
+	// here the ctl handling logic shall be
+	return false;
+}
+
 /* -------------------------- KERNEL SPACE API --------------------------*/
 
 // API
@@ -4457,6 +4471,9 @@ int iccom_flush(struct iccom_dev *iccom)
 //      as global callback for all channels.
 //      NOTE: global callback is used only when specific channel
 //          callback is not set.
+//		NOTE: the ICCOM_CTL_CHANNEL is reserved for the internal
+//			ICCom communications, it will not be possible to use it
+//			from outside of the ICCom.
 // @message_ready_callback {valid ptr || NULL} the pointer to the
 //      callback which is to be called when channel gets a message
 //      ready. NULL value disables the callback function on the channel.
@@ -4486,6 +4503,12 @@ int iccom_set_channel_callback(struct iccom_dev *iccom
 	ICCOM_CHECK_CLOSING("will not invoke", return -EBADFD);
 	if (IS_ERR(message_ready_callback)) {
 		iccom_err("broken callback pointer provided");
+		return -EINVAL;
+	}
+	if (channel == ICCOM_CTL_CHANNEL) {
+		iccom_err("channel %d is reserved for iccom internal ctl messages"
+				  " so, can not assign a custom callback to it"
+				  , ICCOM_CTL_CHANNEL);
 		return -EINVAL;
 	}
 
@@ -4519,6 +4542,12 @@ int iccom_remove_channel_callback(struct iccom_dev *iccom
 	ICCOM_CHECK_XFER_DEVICE("broken xfer device", return -ENODEV);
 	ICCOM_CHECK_CHANNEL("bad channel", return -EBADSLT);
 	ICCOM_CHECK_CLOSING("will not invoke", return -EBADFD);
+	if (channel == ICCOM_CTL_CHANNEL) {
+		iccom_err("channel %d is reserved for iccom internal ctl messages"
+				  " so, can not remove it's callback"
+				  , ICCOM_CTL_CHANNEL);
+		return -EINVAL;
+	}
 	return iccom_msg_storage_reset_channel_callback(
 			&iccom->p->rx_messages, channel);
 }
@@ -4832,10 +4861,17 @@ int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
 		goto free_private;
 	}
 
+	if (iccom_msg_storage_set_channel_callback(
+			&iccom->p->rx_messages, ICCOM_CTL_CHANNEL
+			, __iccom_ctl_msg_handler , iccom) < 0) {
+		iccom_err("Could not register ctl channel clbk.");
+		goto free_msg_storage;
+	}
+
 	res = __iccom_init_packages_storage(iccom);
 	if (res < 0) {
 		iccom_err("Could not initialize packages storage.");
-		goto free_msg_storage;
+		goto unregister_ctl_msgs_handler;
 	}
 
 	iccom->p->last_rx_package_id = ICCOM_PACKAGE_HAVE_NOT_RECEIVED_ID;
@@ -4884,6 +4920,9 @@ discard_testing_sysfs_mutex:
 	mutex_destroy(&iccom->p->sysfs_test_ch_lock);
 free_pkg_storage:
 	__iccom_free_packages_storage(iccom);
+unregister_ctl_msgs_handler:
+	iccom_msg_storage_reset_channel_callback(
+		&iccom->p->rx_messages, ICCOM_CTL_CHANNEL);
 free_msg_storage:
 	iccom_msg_storage_free(&iccom->p->rx_messages);
 free_private:

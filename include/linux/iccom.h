@@ -28,6 +28,12 @@
 
 // the channel value which is interpreted as (any/all) channel(s)
 #define ICCOM_ANY_CHANNEL_VALUE -1
+// This channel is used to control the ICCom internal flows,
+// like embedded acks, protocol advancement negotiations, etc.
+//
+// This channel is not to be exposed outside the ICCom, so pls don't
+// try to use it for any other communication.
+#define ICCOM_CTL_CHANNEL 0
 
 
 // number of error types to be tracked
