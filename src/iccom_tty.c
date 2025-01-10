@@ -46,7 +46,9 @@
 // Debuging level.
 // 0: debugging disabled
 // >0: debugging enabled
-#define ICTTY_DEBUG_LEVEL 1
+#ifndef ICTTY_DEBUG_LEVEL
+	#define ICTTY_DEBUG_LEVEL 0
+#endif
 
 // This value will be used when nothing is explicitly set by DT or other configuration
 // means.
