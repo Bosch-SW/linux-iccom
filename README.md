@@ -725,8 +725,9 @@ is an Examples section below, feel free to jump directly there.
 **NOTE:** `${X}` means "contents of `X`"
 
 **NOTE:** input format is a sequence of commands. Commands are separated with
-semicolons. All whitespaces (including newlines) are ignored. Each command
-must end with semicolon (including the last one).
+semicolons. All whitespaces and newlines are ignored between the
+rules/commands. Within rules/commands whitespaces are ignored.
+Each command must end with semicolon (including the last one).
 
 * `<GLOBAL_COMMANDS_LIST>`:  `${CMD};${CMD};....${CMD};`
   OPTIONAL SEMICOLON SEPARATED LIST of global commands. Available

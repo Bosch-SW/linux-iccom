@@ -33,6 +33,7 @@
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
 #include <linux/hashtable.h>
+#include <linux/ctype.h>
 
 #include <linux/iccom.h>
 
@@ -1029,7 +1030,7 @@ int __iccom_skif_routing_table_append(
 	struct iccom_skif_routing *from
 	, struct iccom_skif_routing *to)
 {
-	if (!IS_ERR_OR_NULL(from)) {
+	if (IS_ERR_OR_NULL(from)) {
 		return 0;
 	}
 
@@ -1461,6 +1462,15 @@ static ssize_t routing_table_store(struct device *dev,
 	// now parsing the rules.
 	int rule_idx = 0;
 	while (count) {
+		// just drop all whitespace incl newlines between rules
+		while (count) {
+			if (isspace(*buf) || *buf == '\n' || *buf == '\r') {
+				chars_parsed = 1;
+				ICCOM_SKIF_JUMP_PARSE();
+			} else {
+				break;
+			}
+		}
 		struct iccom_skif_routing_rule *new_rule;
 		chars_parsed = __iccom_skif_parse_rule(buf, count + 1, &new_rule);
 		if (chars_parsed < 0) {
