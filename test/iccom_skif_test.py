@@ -136,22 +136,40 @@ def routing_table_from_str(rt_string):
                 if (len(compounds) == 0):
                       continue
 
-                # According to contract, only the first entry matters
-                if (compounds[0] in rt_dict):
-                       continue;
-
-                rt_dict[compounds[0]] = compounds[1:]
+                # overlapping entries are merged
+                if compounds[0] in rt_dict:
+                        rt_dict[compounds[0]] += compounds[1:]
+                else:
+                        rt_dict[compounds[0]] = compounds[1:]
 
         # remove duplicates for being graceful
         for (filter, actions) in rt_dict.items():
                 non_dup_actions = []
                 for action in actions:
+                        if action == filter:
+                                action = "x"
                         if action in non_dup_actions:
                                continue
                         non_dup_actions.append(action)
                 rt_dict[filter] = non_dup_actions
 
         return rt_dict
+
+# @rt is a routing table dict:
+#       [{"channel" + "direction"}] -> list of actions [{"channel" + "direction"} | "x"]
+# RETURNS: string representing the given routing table
+def routing_table_to_str(rt):
+        res = ""
+        for filter in sorted(rt):
+                res += filter
+                for action in sorted(rt[filter]):
+                        res += action
+                res += ";"
+        return res
+
+# RETURNS: opmimized representation of the routing table
+def routing_table_optimized_str(rt_string):
+        return routing_table_to_str(routing_table_from_str(rt_string))
 
 # RETURNS: true, when and only when given routing tables 
 #       are semantically identical
@@ -180,6 +198,25 @@ def routing_tables_equal(rt_a_str, rt_b_str, a_comment, b_comment):
                                       % (action, str(rt_b[filter])))
                                 return False
         return True
+
+# @te ICCom test environment, to get the real table from.
+# @written_rt_cmd originally written RT command
+# @expected_rt what we do expect
+def assert_tables_equal(te, written_rt_cmd, expected_rt):
+        real_rt = ("".join(iccom_skif_get_routing_table(
+                                te.iccom_skif_name(), None).split()))
+        expected_rt = ("".join(expected_rt.split()))
+
+        if (not routing_tables_equal(real_rt, expected_rt, "real", "expected")):
+                raise RuntimeError(
+                        "Real routing table doesn't"
+                        " match written routing table (by semantics):\n"
+                        " * Written routing table cmd is: %s\n"
+                        " * Real routing table is: %s (%s)\n"
+                        " * Expected routing table is: %s (%s)\n"
+                        % (written_rt_cmd
+                           , real_rt, routing_table_optimized_str(real_rt)
+                           , expected_rt, routing_table_optimized_str(expected_rt)))
 
 # Test sending data through iccom socket to iccom and transport
 # and get back an answer via iccom socket
@@ -279,24 +316,124 @@ def test_iccom_sk_routing_set_check(
                    }
 
         # initially routing must be disabled
-        
         with IccomTestEnv() as te:
-
                 print("setting %s routing table: %s" % (routing_table_name, rt,))
                 iccom_skif_set_routing_table(te.iccom_skif_name(), rt, None)
+                assert_tables_equal(te, rt, rt)
 
-                real_rt = ("".join(iccom_skif_get_routing_table(
-                                        te.iccom_skif_name(), None).split()))
-                expected_rt = ("".join(rt.split()))
+# Sets the routing table then appends another one.
+# Checks if resulting is a merge of two parts
+def test_iccom_sk_routing_append(
+                params, get_test_info=False):
 
-                if (not routing_tables_equal(real_rt, expected_rt, "real", "expected")):
-                        raise RuntimeError(
-                                "Real routing table doesn't"
-                                " match written routing table (by semantics):\n"
-                                " * Written routing table is: %s\n"
-                                " * Real routing table is: %s\n"
-                                " * Expected routing table is: %s\n"
-                                % (rt, real_rt, expected_rt))
+        if (get_test_info):
+                return { "test_description":
+                                "Append to the existing table."
+                         , "test_id":
+                                "test_iccom_sk_routing_append"
+                   }
+
+        with IccomTestEnv() as te:
+                rt = "+; 22ux10022u;"
+                print("setting routing table: %s" % (rt,))
+                iccom_skif_set_routing_table(te.iccom_skif_name(), rt, None)
+                assert_tables_equal(te, rt, "22ux10022u;")
+
+# Sets the routing table then appends another one.
+# Checks if resulting is a merge of two parts
+def test_iccom_sk_routing_double_append(
+                params, get_test_info=False):
+
+        if (get_test_info):
+                return { "test_description":
+                                "Double append to the existing table."
+                         , "test_id":
+                                "test_iccom_sk_routing_double_append"
+                   }
+
+        with IccomTestEnv() as te:
+
+                rt = " +; 22u x  10022 u ;"
+                print("setting routing table: %s" % (rt,))
+                iccom_skif_set_routing_table(te.iccom_skif_name(), rt, None)
+
+                assert_tables_equal(te, rt, "22ux10022u;")
+
+                rt = " +; 72u 10072 u;"
+                print("setting routing table: %s" % (rt,))
+                iccom_skif_set_routing_table(te.iccom_skif_name(), rt, None)
+
+                assert_tables_equal(te, rt, "22ux10022u;72u10072u;")
+
+# Sets the routing table with new lines in the command
+# Checks if resulting is a merge of two parts
+def test_iccom_sk_routing_whitespace_cmd(
+                params, get_test_info=False):
+
+        if (get_test_info):
+                return { "test_description":
+                                "Routing command with a lot of whitespace."
+                         , "test_id":
+                                "test_iccom_sk_routing_whitespace_cmd"
+                   }
+
+        with IccomTestEnv() as te:
+
+                rt = " \n \n \t 22u \t  x \t 10022 \tu ; \n \t\n "
+                print("setting routing table: %s" % (rt,))
+                iccom_skif_set_routing_table(te.iccom_skif_name(), rt, None)
+
+                assert_tables_equal(te, rt, "22ux10022u;")
+
+# Sets the routing table then appends another one with overlapping rules.
+# Checks if resulting is a merge of two parts
+def test_iccom_sk_routing_double_append_with_overlap(
+                params, get_test_info=False):
+
+        if (get_test_info):
+                return { "test_description":
+                                "Double append to the existing table with overlap."
+                         , "test_id":
+                                "test_iccom_sk_routing_double_overlap_append"
+                   }
+
+        with IccomTestEnv() as te:
+
+                rt = " +; 22u x  10022 u ;"
+                print("setting routing table: %s" % (rt,))
+                iccom_skif_set_routing_table(te.iccom_skif_name(), rt, None)
+
+                assert_tables_equal(te, rt, "22ux10022u;")
+
+                rt = " +; 22u 122 u x 522u; 77u x 177u;"
+                print("setting routing table: %s" % (rt,))
+                iccom_skif_set_routing_table(te.iccom_skif_name(), rt, None)
+
+                assert_tables_equal(te, rt, "22ux10022u122u522u;77ux177u;")
+
+# Executes multiple routing cmds and then checks if the routing table
+# is correct.
+def test_iccom_sk_routing_multi_cmd(
+                params, get_test_info=False):
+
+        sequence_name = params["sequence_name"]
+        cmds = params["cmds"]
+        expected_rt = params["expected_rt"]
+
+        if (get_test_info):
+                return { "test_description":
+                                "Multiple routing cmds are executed, then rt checked."
+                         , "test_id":
+                                "test_iccom_sk_routing_multi_cmd.%s" % (sequence_name)
+                   }
+
+        with IccomTestEnv() as te:
+                for cmd in cmds:
+                        rt = cmd
+                        print("setting routing table: %s" % (rt,))
+                        iccom_skif_set_routing_table(te.iccom_skif_name(), rt, None)
+
+                assert_tables_equal(te, cmds, expected_rt)
 
 # Sets the routing table cyclically many times,
 # checks if it was saved properly (implies the test for )
@@ -327,21 +464,7 @@ def test_iccom_sk_routing_set_smoke_test(
                         for rt in routing_tables:
                                 iccom_skif_set_routing_table(
                                         te.iccom_skif_name(), rt, None)
-
-                                real_rt = iccom_skif_get_routing_table(
-                                                te.iccom_skif_name(), None)
-                                real_rt = ("".join(real_rt.split()))
-                                expected_rt = ("".join(rt.split()))
-
-                                if (not routing_tables_equal(real_rt, expected_rt
-                                                        , "real", "expected")):
-                                        raise RuntimeError(
-                                                "Real routing table doesn't"
-                                                " match written routing table:\n"
-                                                " * Written routing table is: %s\n"
-                                                " * Real routing table is: %s\n"
-                                                " * Expected routing table is: %s\n"
-                                                % (rt, real_rt, expected_rt))
+                                assert_tables_equal(te, rt, rt)
 
 
 # Helper for test_iccom_skif_routing_primitive.
@@ -358,6 +481,10 @@ def test_iccom_sk_routing_set_smoke_test(
 def __routing_primitive_test_helper(
                 te, params, transport_frame, us_sockets
                 , expected_upcast_ch_list, expected_downcast_ch_list):
+
+        # iccom sorts internally the actions, so to make it proper without
+        # parsing the packages, let's just sort it as well
+        expected_downcast_ch_list = sorted(expected_downcast_ch_list)
 
         in_direction = params["initial_direction"]
         in_ch = params["msg_inbound_channel"]
@@ -496,18 +623,8 @@ def test_iccom_skif_routing_primitive(params, get_test_info=False):
                 rt += extra_routes
 
                 print("Routing table: ", rt)
-
                 iccom_skif_set_routing_table(te.iccom_skif_name(), rt, None)
-                real_rt = ("".join(iccom_skif_get_routing_table(te.iccom_skif_name(), None).split()))
-                expected_rt = ("".join(rt.split()))
-
-                if (not routing_tables_equal(real_rt, expected_rt, "real", "expected")):
-                        raise RuntimeError("Real routing table doesn't"
-                                " match written routing table:\n"
-                                " * Written routing table is: %s\n"
-                                " * Real routing table is: %s\n"
-                                " * Expected routing table is: %s\n"
-                                % (rt, real_rt, expected_rt))
+                assert_tables_equal(te, rt, rt)
 
                 # prepare to listen US slots
 
@@ -549,8 +666,8 @@ def test_iccom_skif_routing_primitive(params, get_test_info=False):
 
 class IccomSkifTester(GeneralTest):
 
-        def __init__(self, skip_list=None):
-                super(IccomSkifTester, self).__init__("iccom_skif", skip_list)
+        def __init__(self, skip_list=None, run_list=None):
+                super(IccomSkifTester, self).__init__("iccom_skif", skip_list, run_list)
 
         # Runs all the iccom socket tests
         def run_tests(self):
@@ -635,6 +752,46 @@ class IccomSkifTester(GeneralTest):
                         , { "routing_table": "10ux;12ux17u17d;14dx;14dx1u2u;1ux2dx3uxx;"
                             , "routing_table_name": "mixed_3v_multiple_default_actions_overload_entries"
                         })
+
+                self.test(test_iccom_sk_routing_append, {})
+                self.test(test_iccom_sk_routing_double_append, {})
+                self.test(test_iccom_sk_routing_whitespace_cmd, {})
+                self.test(test_iccom_sk_routing_double_append_with_overlap, {})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "append_overlap"
+                                , "cmds": ["+;1u2d1u4u;"
+                                           , "+;1ux2d5u;22ux44u;"]
+                                , "expected_rt": "1ux2d4u5u;22ux44u;"})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "append_full_overlap"
+                                , "cmds": ["+;1u2d1u4u;"
+                                           , "+;1ux2d4u;22ux44u;"]
+                                , "expected_rt": "1ux2d4u;22ux44u;"})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "append_no_overlap"
+                                , "cmds": ["+;1u2d1u4u;"
+                                           , "+;1u10u11u;22ux44u;"]
+                                , "expected_rt": "1ux2d4u10u11u;22ux44u;"})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "append_1_overlap"
+                                , "cmds": ["+;1u2d1u4u;"
+                                           , "+;1u2d;22ux44u;"]
+                                , "expected_rt": "1ux2d4u;22ux44u;"})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "append_1_no_overlap"
+                                , "cmds": ["+;1u2d1u4u;"
+                                           , "+;1u10u;22ux44u;"]
+                                , "expected_rt": "1ux2d4u10u;22ux44u;"})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "append_duplicated_overlap"
+                                , "cmds": ["+;1u2d1u4u;"
+                                           , "+;1u2d4u4u6d;22ux44u;"]
+                                , "expected_rt": "1ux2d4u6d;22ux44u;"})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "append_duplicated_no_overlap"
+                                , "cmds": ["+;1u2d1u4u;"
+                                           , "+;1u10u10u10d;22ux44u;"]
+                                , "expected_rt": "1ux2d4u10u10d;22ux44u;"})
 
                 self.test(test_iccom_sk_routing_set_smoke_test
                         , { "routing_tables": [
@@ -964,7 +1121,7 @@ class IccomSkifTester(GeneralTest):
 
 
 def run_tests():
-        # tester = IccomSkifTester(skip_list= [
+        #tester = IccomSkifTester(skip_list= [
         # "test_try_changing_protocol_family_after_initialization"
         # , "iccom_sk_data_comm_with_transport_level_simple_small_msg.python"
         # , "iccom_sk_data_comm_with_transport_level_single_char_msg.python"
@@ -981,6 +1138,17 @@ def run_tests():
         # , "test_iccom_sk_routing_set_check.mixed_2v_multiple_default_actions"
         # , "test_iccom_sk_routing_set_check.mixed_3v_multiple_default_actions_double_entries"
         # , "test_iccom_sk_routing_set_check.mixed_3v_multiple_default_actions_overload_entries"
+        # , "test_iccom_sk_routing_append"
+        # , "test_iccom_sk_routing_double_append"
+        # , "test_iccom_sk_routing_whitespace_cmd"
+        # , "test_iccom_sk_routing_double_overlap_append"
+        # , "test_iccom_sk_routing_multi_cmd.append_overlap"
+        # , "test_iccom_sk_routing_multi_cmd.append_full_overlap"
+        # , "test_iccom_sk_routing_multi_cmd.append_no_overlap"
+        # , "test_iccom_sk_routing_multi_cmd.append_1_overlap"
+        # , "test_iccom_sk_routing_multi_cmd.append_1_no_overlap"
+        # , "test_iccom_sk_routing_multi_cmd.append_duplicated_overlap"
+        # , "test_iccom_sk_routing_multi_cmd.append_duplicated_no_overlap"
         # , "test_iccom_sk_routing_set_smoke.multiple_routing_rules"
         # , "test_iccom_sk_routing_set_check.spaced_routing_table"
         # , "test_iccom_sk_routing_set_check.realistic_rt"
@@ -1012,7 +1180,12 @@ def run_tests():
         # , "iccom_skif_routing_primitive.downwards_extra_rules_pass_via_allowed_default"
         # , "iccom_skif_routing_primitive.upwards_extra_rules_allowed_default_multicast"
         # , "iccom_skif_routing_primitive.downwards_extra_rules_allowed_default_multicast"
-        # ])
+        #])
+
+        #tester = IccomSkifTester(run_list=[
+        #    "iccom_skif_routing_primitive.1to_6up_4down_and_same"
+        #    , "iccom_skif_routing_primitive.1to_6up_4down_and_same_extra_rule_100_cycles"
+        #])
 
         tester = IccomSkifTester()
 

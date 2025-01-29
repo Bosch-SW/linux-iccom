@@ -733,7 +733,12 @@ Each command must end with semicolon (including the last one).
   OPTIONAL SEMICOLON SEPARATED LIST of global commands. Available
   commands are:
   * `+`:  
-    when given, then the incoming data will be appended to existing table
+    when given, then the incoming data will be appended to existing table.
+    NOTE: the (partially) overlapping rules (the rules with the same filter)
+    will be merged together using the OR logic, the same applies to the
+    duplicated rules inside the command.
+    NOTE: the rule actions execution order is not specified and depends on
+    implementation, so don't do assumptions on the actions order.
   * `-`:  
     will drop the routing and switch IccomSkif into classic mode (all
     channels are allowed pass-through + loopback configuration).

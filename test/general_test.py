@@ -2,9 +2,10 @@ import string
 
 class GeneralTest:
 
-        def __init__(self, domain_name, skip_list=None):
+        def __init__(self, domain_name, skip_list=None, run_list=None):
                 self.tests = {}
                 self.skip_tests_list = [] if skip_list is None else skip_list
+                self.run_tests_list = run_list
                 self.domain_name = domain_name
                 self.default_test_id = 1
 
@@ -95,7 +96,8 @@ class GeneralTest:
                     self.append_report(test_id, "NA")
                     return
 
-                if test_id in self.skip_tests_list:
+                if ((test_id in self.skip_tests_list)
+                        or (self.run_tests_list is not None and test_id not in self.run_tests_list)):
                     print("%s: SKIPPED" % (test_id,))
                     self.append_report(test_id, None)
                     return

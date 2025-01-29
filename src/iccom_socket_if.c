@@ -34,6 +34,7 @@
 #include <linux/of_platform.h>
 #include <linux/hashtable.h>
 #include <linux/ctype.h>
+#include <linux/sort.h>
 
 #include <linux/iccom.h>
 
@@ -216,6 +217,10 @@ struct iccom_skif_loopback_mapping_rule {
 
 
 // Describes a single action for the message being processed.
+// @dst_channel the destination channel number.
+// @direction the destination direction
+//		0 - down (toward ICCom and further down to the other side)
+//		1 - up (from ICComSkif to user space)
 // NOTE: no-action registered for the channel 
 // NOTE: DO NOT PACK!
 struct iccom_skif_routing_action {
@@ -648,6 +653,121 @@ inline struct iccom_skif_routing_rule *__iccom_skif_match_rule(
 		}
 	}
 	return NULL;
+}
+
+// Just a comparator for the struct iccom_skif_routing_action.
+// Orders first by the destination channel, and then by direction.
+// Down direction is "smaller" than up direction.
+int __iccom_skif_routing_action_cmp(
+	const void *a, const void *b, const void *priv)
+{
+	(void)priv;
+	struct iccom_skif_routing_action *first = (struct iccom_skif_routing_action*)(a);
+	struct iccom_skif_routing_action *second = (struct iccom_skif_routing_action*)(b);
+
+	if (first->dst_channel < second->dst_channel) {
+		return -1;
+	}
+	if (first->dst_channel > second->dst_channel) {
+		return 1;
+	}
+	if (first->direction == second->direction) {
+		return 0;
+	}
+	if (first->direction == false) {
+		return -1;
+	}
+	return 1;
+}
+
+// Merges two rules @dst and @add into @dst using the OR logic.
+// NOTE: modifies both dst and add by sorting their actions
+// NOTE: if merge fails will not revert data to the original state.
+// @dst {VALID ptr to the rule}
+// @add {NULL | VALID ptr to the rule}, if NULL then just returns.
+// RETURNS: 0: merge successful
+//		<0: merge failed
+// CONTEXT: rules are not modified in parallel
+static int __iccom_skif_merge_rules(
+	struct iccom_skif_routing_rule *const dst
+	, struct iccom_skif_routing_rule *const add)
+{
+	if (IS_ERR_OR_NULL(add)) {
+		return 0;
+	}
+	if (IS_ERR_OR_NULL(dst)) {
+		return -EINVAL;
+	}
+
+	if (add->use_default_action) {
+		dst->use_default_action = true;
+	}
+
+	// jep, small arrays, not really relevant, but still
+
+	// sorting both dst and add
+	sort_r(dst->custom_acts, dst->custom_acts_size
+		   , sizeof(dst->custom_acts[0])
+		   , __iccom_skif_routing_action_cmp
+		   , NULL, NULL);
+	sort_r(add->custom_acts, add->custom_acts_size
+		   , sizeof(add->custom_acts[0])
+		   , __iccom_skif_routing_action_cmp
+		   , NULL, NULL);
+
+	// merging both together in one and dropping duplicated entries
+	struct iccom_skif_routing_action tmp[2 * ICCOM_SKIF_ROUTING_MAX_ACTIONS];
+	int i = 0; // dst idx
+	int j = 0; // add idx
+	int tgt = 0;
+	while ((i < dst->custom_acts_size || j < add->custom_acts_size)
+			&& tgt < ARRAY_SIZE(tmp)) {
+		// selecting which source is smaller
+		int cmp;
+		if (i >= dst->custom_acts_size) {
+			cmp = 1;
+		} else if (j >= add->custom_acts_size) {
+			cmp = -1;
+		} else {
+			cmp = __iccom_skif_routing_action_cmp(
+				&dst->custom_acts[i], &add->custom_acts[j], NULL);
+		}
+
+		// taking the smaller value from source
+		struct iccom_skif_routing_action *value = NULL;
+		if (cmp < 0) {
+			value = &dst->custom_acts[i];
+			i++;
+		} else if (cmp > 0) {
+			value = &add->custom_acts[j];
+			j++;
+		} else {
+			value = &dst->custom_acts[i];
+			i++;
+			j++;
+		}
+
+		// writing it into array if prev value there is not equal
+		// to to-be-inserted one
+		if (tgt == 0 
+			|| __iccom_skif_routing_action_cmp(&tmp[tgt - 1]
+			                                   , value, NULL) < 0){
+			tmp[tgt] = *value;
+			tgt++;
+		}
+	}
+
+	const int result_len = tgt;
+
+	if (result_len > ICCOM_SKIF_ROUTING_MAX_ACTIONS) {
+		iccom_skif_err("can not merge routing rules, result is too big.");
+		return -EFBIG;
+	}			
+
+	memcpy(dst->custom_acts, tmp, result_len * sizeof(tmp[0]));
+	dst->custom_acts_size = result_len;
+
+	return 0;
 }
 
 // Processes the message according to the current routing configuration.
@@ -1228,12 +1348,24 @@ static ssize_t __iccom_skif_parse_rule(
 			goto cleanup_rule;
 		}
 
-		rule->custom_acts[rule->custom_acts_size].dst_channel = channel;
-		rule->custom_acts[rule->custom_acts_size].direction = (dir_char == 'u');
-		rule->custom_acts_size += 1;
+		const bool direction = (dir_char == 'u');
+		if (channel == rule->incoming_channel
+				&& direction == rule->initial_direction) {
+			rule->use_default_action = true;
+		} else {
+			rule->custom_acts[rule->custom_acts_size].dst_channel = channel;
+			rule->custom_acts[rule->custom_acts_size].direction = direction;
+			rule->custom_acts_size += 1;
+		}
 
 		ICCOM_SKIF_JUMP_PARSE();
 	}
+
+	// to be a bit more predictable to simplify tests as well: sort the actions
+	sort_r(rule->custom_acts, rule->custom_acts_size
+		   , sizeof(rule->custom_acts[0])
+		   , __iccom_skif_routing_action_cmp
+		   , NULL, NULL);
 
 	*out = rule;
 	return orig_count - count;
@@ -1487,17 +1619,28 @@ static ssize_t routing_table_store(struct device *dev,
 		}
 
 		// check it it already exists, then discard it
-		if (IS_ERR_OR_NULL(__iccom_skif_match_rule(
+		
+		struct iccom_skif_routing_rule *const existing_rule = __iccom_skif_match_rule(
 					new_rt->rules, ICCOM_SKIF_ROUTING_HASH_SIZE_BITS
-					, new_rule->incoming_channel, new_rule->initial_direction))) {
+					, new_rule->incoming_channel, new_rule->initial_direction);
+		if (IS_ERR_OR_NULL(existing_rule)) {
 			hash_add(new_rt->rules, &new_rule->hash_list_anchor
 						, __iccom_skif_routing_hkey(new_rule->incoming_channel
 													, new_rule->initial_direction));
 		} else {
-			iccom_skif_warning("Duplicated Rule Filter in Routing Table: \"%s\"."
-			 		" Duplicating rule position: %zu, rule index: %d. Will ignore"
-					" everything except for the first rule entry."
-					, orig_buf, buf - orig_buf, rule_idx);
+			// merge rules with OR logic
+			ret = __iccom_skif_merge_rules(existing_rule, new_rule);
+
+			kfree(new_rule);
+			new_rule = NULL;
+
+			if (ret < 0) {
+				iccom_skif_warning("Failed to make a full merge of : \"%s\" into"
+						" the current table. Failed merge rule position: %zu,"
+						" rule index: %d. All changes will be discarded."
+						, orig_buf, buf - orig_buf, rule_idx);
+				goto release_new_rt;
+			}
 		}
 
 		rule_idx += 1;
