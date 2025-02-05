@@ -770,6 +770,78 @@ static int __iccom_skif_merge_rules(
 	return 0;
 }
 
+// Subtracts two rules: @dst - @diff into @dst.
+// NOTE: modifies both dst and add by sorting their actions
+// NOTE: if subtraction fails will not revert data to the original state.
+// @dst {VALID ptr to the rule}
+// @diff {NULL | VALID ptr to the rule}, if NULL then just returns.
+// RETURNS: 0: subtraction successful
+//		<0: subtraction failed
+// CONTEXT: rules are not modified in parallel
+static int __iccom_skif_subtract_rules(
+	struct iccom_skif_routing_rule *const dst
+	, struct iccom_skif_routing_rule *const diff)
+{
+	if (IS_ERR_OR_NULL(diff)) {
+		return 0;
+	}
+	if (IS_ERR_OR_NULL(dst)) {
+		return -EINVAL;
+	}
+
+	if (diff->use_default_action) {
+		dst->use_default_action = false;
+	}
+
+	// sorting both dst and add
+	sort_r(dst->custom_acts, dst->custom_acts_size
+		   , sizeof(dst->custom_acts[0])
+		   , __iccom_skif_routing_action_cmp
+		   , NULL, NULL);
+	sort_r(diff->custom_acts, diff->custom_acts_size
+		   , sizeof(diff->custom_acts[0])
+		   , __iccom_skif_routing_action_cmp
+		   , NULL, NULL);
+
+	int i = 0; // dst idx
+	int j = 0; // diff idx
+	int tgt = 0; // dst write idx
+	while ((i < dst->custom_acts_size && j < diff->custom_acts_size)) {
+		int cmp = __iccom_skif_routing_action_cmp(
+				&dst->custom_acts[i], &diff->custom_acts[j], NULL);
+		if (cmp > 0) {
+			j++;
+			continue;
+		}
+		if (cmp < 0) {
+			if (i != tgt) {
+				dst->custom_acts[tgt] = dst->custom_acts[i];
+			}
+			i++;
+			tgt++;
+			continue;
+		}
+
+		i++;
+	}
+	while (i < dst->custom_acts_size) {
+		dst->custom_acts[tgt] = dst->custom_acts[i];
+		i++;
+		tgt++;
+	}
+
+	dst->custom_acts_size = tgt;
+
+	return 0;
+}
+
+// RETURNS: if the routing rule is empty
+static inline bool __iccom_skif_rule_empty(
+	const struct iccom_skif_routing_rule *const rule)
+{
+	return (rule->custom_acts_size == 0) && (!rule->use_default_action);
+}
+
 // Processes the message according to the current routing configuration.
 // If routing is enabled follows the routing rules provided by userland.
 // If routing is disabled then only classical loopback functionality is
@@ -1380,7 +1452,7 @@ cleanup_rule:
 //
 // NOTE: @count counts the string length without final 0.
 // 
-// NOTE: writing "-;" command string disables routing and IccomSkif goes
+// NOTE: writing "d;" command string disables routing and IccomSkif goes
 //		into classical mode (with only loopback option available).
 //
 // NOTE: if routing is enabled, then EVERYTHING WHICH IS NOT EXPLICITLY
@@ -1400,8 +1472,11 @@ cleanup_rule:
 //		commands are:
 //		* "+":
 //          when given, then the incoming data will be appended to
-//          existing table
+//          existing table (blended with OR logic)
 //		* "-":
+//			incoming data data will be subtracted from the existing
+//			table. NOTE: resulting empty rules will be discarded.
+//		* "d":
 //			will drop the routing and switch IccomSkif into classic mode.
 //		* `x`:
 //          set default action for all channels and directions to `allow`,
@@ -1411,9 +1486,9 @@ cleanup_rule:
 //
 //		EXAMPLE:
 //			"+; <some rules here>" will append the rules defined after "+"
-//			command to the existing routing table.
+//			command to the existing routing table (blended with OR logic).
 //		EXAMPLE:
-//			" x;\n" will drop the routing and switch to the classic mode.
+//			" d;\n" will drop the routing and switch to the classic mode.
 //			NOTE: all whitespaces including newlines are ignored.
 //
 //  * <RULES_LIST>: "${RULE};${RULE};...${RULE};"
@@ -1444,9 +1519,9 @@ cleanup_rule:
 //
 // 		NOTE: all whitespaces including newlines are ignored.
 //
-//		" - ;\n"
+//		" d ;\n"
 //          same as next example
-//		"-;"
+//		"d;"
 //          Global command: disable routing, switch to classical mode.
 //		"123ux;\n"
 //          One rule: messages incoming via ch 123 UPWARDS will be subjected
@@ -1533,7 +1608,7 @@ static ssize_t routing_table_store(struct device *dev,
 
 	// If the cmd is "-", then routing
 	// gets disabled and IccomSkif switches into classical mode.
-	if (global_cmd == '-') {
+	if (global_cmd == 'd') {
 		if (count > 0) {
 			iccom_skif_info("Extra data is expected with global command '-'."
 			                " If you drop the table, just use \"x;\" with optional"
@@ -1564,13 +1639,14 @@ static ssize_t routing_table_store(struct device *dev,
 	}
 
 	// If first cmd is "+" then we append new table to existing routing table.
-	if (global_cmd == '+') {
-		// NOTE: just raw "+" - no effect, old rt persists
+	if (global_cmd == '+' || global_cmd == '-') {
+		// NOTE: just raw "+"/"-" - no effect, old rt persists
 		if (count == 0) {
 			ret = orig_count;
 			iccom_skif_info("Old routing table persisted with no changes."
 					" If you want to append the rules to existing table just"
-					" append them after \"+;\" command.");
+					" append them after \"+;\" command. Same applies to \"-;\""
+					" command.");
 			goto release_new_rt;
 		}
 
@@ -1620,26 +1696,51 @@ static ssize_t routing_table_store(struct device *dev,
 
 		// check it it already exists, then discard it
 		
-		struct iccom_skif_routing_rule *const existing_rule = __iccom_skif_match_rule(
+		struct iccom_skif_routing_rule *existing_rule = __iccom_skif_match_rule(
 					new_rt->rules, ICCOM_SKIF_ROUTING_HASH_SIZE_BITS
 					, new_rule->incoming_channel, new_rule->initial_direction);
 		if (IS_ERR_OR_NULL(existing_rule)) {
-			hash_add(new_rt->rules, &new_rule->hash_list_anchor
-						, __iccom_skif_routing_hkey(new_rule->incoming_channel
-													, new_rule->initial_direction));
+			if (global_cmd != '-') {
+				hash_add(new_rt->rules, &new_rule->hash_list_anchor
+							, __iccom_skif_routing_hkey(new_rule->incoming_channel
+														, new_rule->initial_direction));
+			}
 		} else {
-			// merge rules with OR logic
-			ret = __iccom_skif_merge_rules(existing_rule, new_rule);
+			if (global_cmd == '-') {
+				// subtract rules
+				ret = __iccom_skif_subtract_rules(existing_rule, new_rule);
 
-			kfree(new_rule);
-			new_rule = NULL;
+				kfree(new_rule);
+				new_rule = NULL;
 
-			if (ret < 0) {
-				iccom_skif_warning("Failed to make a full merge of : \"%s\" into"
-						" the current table. Failed merge rule position: %zu,"
-						" rule index: %d. All changes will be discarded."
-						, orig_buf, buf - orig_buf, rule_idx);
-				goto release_new_rt;
+				if (ret < 0) {
+					iccom_skif_warning("Failed to subtract: \"%s\" from"
+							" the current table. Failed subtraction rule position: %zu,"
+							" rule index: %d. All changes will be discarded."
+							, orig_buf, buf - orig_buf, rule_idx);
+					goto release_new_rt;
+				}
+
+				// will not keep empty rules
+				if (__iccom_skif_rule_empty(existing_rule)) {
+					hlist_del(&existing_rule->hash_list_anchor);
+					kfree(existing_rule);
+					existing_rule = NULL;
+				}
+			} else {
+				// merge rules with OR logic
+				ret = __iccom_skif_merge_rules(existing_rule, new_rule);
+
+				kfree(new_rule);
+				new_rule = NULL;
+
+				if (ret < 0) {
+					iccom_skif_warning("Failed to make a full merge of : \"%s\" into"
+							" the current table. Failed merge rule position: %zu,"
+							" rule index: %d. All changes will be discarded."
+							, orig_buf, buf - orig_buf, rule_idx);
+					goto release_new_rt;
+				}
 			}
 		}
 
@@ -1695,7 +1796,7 @@ static ssize_t routing_table_show(struct device *dev,
 
 	// routing disabled case
 	if (IS_ERR_OR_NULL(rt)) {
-		count += scnprintf(buf + count, PAGE_SIZE - count, "-;");
+		count += scnprintf(buf + count, PAGE_SIZE - count, "d;");
 		goto done;
 	}
 

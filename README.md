@@ -739,7 +739,12 @@ Each command must end with semicolon (including the last one).
     duplicated rules inside the command.
     NOTE: the rule actions execution order is not specified and depends on
     implementation, so don't do assumptions on the actions order.
-  * `-`:  
+  * `-`:
+    incoming data data will be subtracted from the existing
+    table. NOTE: resulting empty rules will be discarded.
+    NOTE: if duplications are in the subtrahend, they all will be
+    subtracted.
+  * `d`:
     will drop the routing and switch IccomSkif into classic mode (all
     channels are allowed pass-through + loopback configuration).
   * `x`:  
@@ -752,7 +757,12 @@ Each command must end with semicolon (including the last one).
     will append the rules defined after `+` command to the existing routing table.
 
   EXAMPLE:  
-	* ` -;\n`:  
+  * `-; <some rules here>`:
+    will remove mentioned rule actions from the existing routing table,
+    and if resulting rule is empty then it also will be removed.
+
+  EXAMPLE:
+	* ` d;\n`:
     will drop the routing and switch to the classic mode.
 		**NOTE:** all whitespaces including newlines are ignored.
 
@@ -817,9 +827,9 @@ And here are the promised textual examples:
 
 **NOTE:** all whitespaces including newlines are ignored.
 
-* ` - ;\n`
+* ` d ;\n`
   same as next example,
-* `-;`
+* `d;`
   disable routing, switch to classical mode,
 * `123ux;\n`
   One rule:
@@ -876,6 +886,14 @@ And here are the promised textual examples:
     also will be multicasted to the channel `66` in US. Writing to this channel
     from US side is OK, cause all non-mentioned pairs or channel+direction are
     allowed by default in `x` mode.
+* `-;55ux155u255u355u;`
+  * if the existing routing table looks, for example like this:
+    `55ux100u155u255u355u455u;` then the result of subtraction will be:
+    `55u100u455u;`, so the mentioned actions are removed.
+* `-;55ux155u255u10000u;`
+  * if the existing routing table looks, for example like this:
+    `66ux;55ux155u255u;` then the result of subtraction will be:
+    `66ux;`, cause the `55u` rule is deleted due to become empty.
 
 # Iccom TTY guide
 

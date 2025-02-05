@@ -294,7 +294,7 @@ def test_iccom_sk_check_default_routing(
 
                 # initially routing must be disabled
                 orig_rt = iccom_skif_get_routing_table(te.iccom_skif_name(), None)
-                if (orig_rt != "-;"):
+                if (orig_rt != "d;"):
                         raise RuntimeError(
                                 "Routing configuration is not disabled initially."
                                 " The initial routing table is: %s" % (orig_rt,))
@@ -792,6 +792,29 @@ class IccomSkifTester(GeneralTest):
                                 , "cmds": ["+;1u2d1u4u;"
                                            , "+;1u10u10u10d;22ux44u;"]
                                 , "expected_rt": "1ux2d4u10u10d;22ux44u;"})
+
+                # subtraction section
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "subtract_simple"
+                                , "cmds": ["1ux2u3u4u;"
+                                           , "-;1u3u;"]
+                                , "expected_rt": "1ux2u4u;" })
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "subtract_rule_removal"
+                                , "cmds": ["1ux2u3u4u;2ux;"
+                                           , "-;1u1u2u3u4u;"]
+                                , "expected_rt": "2ux;"})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "subtract_more_than_there"
+                                , "cmds": ["1ux2u3u4u;2ux;"
+                                           , "-;1u1u2u3u4u5u6u;"]
+                                , "expected_rt": "2ux;"})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "subtract_all_and_more"
+                                , "cmds": ["1ux2u3u4u;2ux;"
+                                           , "-;2ux5u8d;1u1u2u3u4u5u6u;"]
+                                , "expected_rt": ""})
+
 
                 self.test(test_iccom_sk_routing_set_smoke_test
                         , { "routing_tables": [
