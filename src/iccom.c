@@ -753,6 +753,11 @@ struct iccom_packet {
 //              transferred to the consumer;
 //          false: then message data ownership remains in ICCom,
 //              and is immediately discarded after callback invocation.
+// 
+// @total_msgs_rcv indicates the total number of the messages received
+//		on this channel.
+// @total_consumer_bytes_rcv indicates the total number of consumer
+//		bytes received on this channel.
 struct iccom_message_storage_channel
 {
 	struct list_head channel_anchor;
@@ -764,6 +769,9 @@ struct iccom_message_storage_channel
 
 	void *consumer_callback_data;
 	iccom_msg_ready_callback_ptr_t message_ready_callback;
+
+	int64_t total_msgs_rcv;
+	int64_t total_consumer_bytes_rcv;
 };
 
 // Describes the messages storage. Intended to be used to
@@ -1895,6 +1903,9 @@ __iccom_msg_storage_add_channel(struct iccom_message_storage *storage
 	channel_rec->consumer_callback_data = NULL;
 	channel_rec->message_ready_callback = NULL;
 
+	channel_rec->total_msgs_rcv = 0;
+	channel_rec->total_consumer_bytes_rcv = 0;
+
 	return channel_rec;
 }
 
@@ -2329,7 +2340,11 @@ static void __iccom_msg_storage_channel_commit(
 		if (msg->uncommitted_length == 0) {
 			continue;
 		}
+		channel_rec->total_consumer_bytes_rcv += msg->uncommitted_length;
 		msg->uncommitted_length = 0;
+		if (msg->finalized) {
+			channel_rec->total_msgs_rcv++;
+		}
 	}
 }
 
@@ -5719,6 +5734,39 @@ static ssize_t statistics_show(
 }
 static DEVICE_ATTR_RO(statistics);
 
+// Prints info about the current iccom channels.
+static ssize_t channels_show(
+		struct device *dev, struct device_attribute *attr, char *buf)
+{
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
+
+	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
+	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -ENODEV);
+
+	size_t len = 0;
+
+	// need to lock storage to get the info
+	struct iccom_message_storage *storage = &iccom->p->rx_messages;
+	struct iccom_message_storage_channel *channel_rec = NULL;
+	mutex_lock(&storage->lock);
+	list_for_each_entry(channel_rec, &storage->channels_list
+			    , channel_anchor) {
+		len += (size_t)scnprintf(buf + len, PAGE_SIZE - len,
+				"%d:  I: %llu m %llu b\n"
+				, channel_rec->channel
+				, channel_rec->total_msgs_rcv
+				, channel_rec->total_consumer_bytes_rcv
+				);
+	}
+	atomic_set(&storage->uncommitted_finalized_count, 0);
+	mutex_unlock(&storage->lock);
+
+	return len;
+}
+static DEVICE_ATTR_RO(channels);
+
 // The size of the data package currently used, in bytes
 static ssize_t data_package_size_show(
 		struct device *dev, struct device_attribute *attr, char *buf)
@@ -5894,6 +5942,7 @@ static DEVICE_ATTR_WO(channels_ctl);
 static struct attribute *iccom_dev_attrs[] = {
 	&dev_attr_transport.attr,
 	&dev_attr_statistics.attr,
+	&dev_attr_channels.attr,
 	&dev_attr_channels_ctl.attr,
 	&dev_attr_channels_RW.attr,
 	&dev_attr_data_package_size.attr,

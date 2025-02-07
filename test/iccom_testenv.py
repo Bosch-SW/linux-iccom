@@ -192,6 +192,15 @@ class IccomTestEnv:
                 print("ICCom %s statistics:" % (fn,))
                 with open(fn, "r") as statistics:
                         for line in statistics.readlines():
+                                line = line.strip()
+                                print("    | " + line)
+                
+                fn = "/sys/devices/platform/" + self.get_one_iccom_name() + "/channels"
+
+                print("ICCom %s channel statistics:" % (fn,))
+                with open(fn, "r") as statistics:
+                        for line in statistics.readlines():
+                                line = line.strip()
                                 print("    | " + line)
         
         def curr_dpkg_size(self, refresh=False):
