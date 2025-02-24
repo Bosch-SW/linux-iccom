@@ -739,11 +739,13 @@ Each command must end with semicolon (including the last one).
     duplicated rules inside the command.
     NOTE: the rule actions execution order is not specified and depends on
     implementation, so don't do assumptions on the actions order.
+    NOTE: will not change the default action of the existing routing table.
   * `-`:
     incoming data data will be subtracted from the existing
     table. NOTE: resulting empty rules will be discarded.
     NOTE: if duplications are in the subtrahend, they all will be
     subtracted.
+    NOTE: will not change the default action of the existing routing table.
   * `d`:
     will drop the routing and switch IccomSkif into classic mode (all
     channels are allowed pass-through + loopback configuration).

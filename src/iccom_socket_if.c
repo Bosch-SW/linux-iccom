@@ -1204,6 +1204,7 @@ void __iccom_skif_routing_drop(struct iccom_sockets_device *iccom_sk)
 //    usually we want to have the original table intact, while we creating
 //    the next version of table.
 // NOTE: if fails, the @to might have partial data imported from @from.
+// NOTE: the default action is also set from @from to @to.
 //
 // @from {NULL | valid ptr} the valid routing table to read contents from.
 //		NOTE: if NULL, then function just returns with success.
@@ -1240,6 +1241,8 @@ int __iccom_skif_routing_table_append(
 					, __iccom_skif_routing_hkey(new_rule->incoming_channel
 												, new_rule->initial_direction));
 	}
+
+	to->allowed_by_default = from->allowed_by_default;
 
 	return 0;
 }

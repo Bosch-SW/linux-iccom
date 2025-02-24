@@ -792,6 +792,11 @@ class IccomSkifTester(GeneralTest):
                                 , "cmds": ["+;1u2d1u4u;"
                                            , "+;1u10u10u10d;22ux44u;"]
                                 , "expected_rt": "1ux2d4u10u10d;22ux44u;"})
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "append_no_default_change"
+                                , "cmds": ["x;1u4u6u;"
+                                           , "+;1u10u;"]
+                                , "expected_rt": "x;1u4u6u10u;"})
 
                 # subtraction section
                 self.test(test_iccom_sk_routing_multi_cmd, {
@@ -814,7 +819,11 @@ class IccomSkifTester(GeneralTest):
                                 , "cmds": ["1ux2u3u4u;2ux;"
                                            , "-;2ux5u8d;1u1u2u3u4u5u6u;"]
                                 , "expected_rt": ""})
-
+                self.test(test_iccom_sk_routing_multi_cmd, {
+                                "sequence_name": "subtract_no_default_change"
+                                , "cmds": ["x;1u4u6u;"
+                                           , "-;1u6u10u;"]
+                                , "expected_rt": "x;1u4u;"})
 
                 self.test(test_iccom_sk_routing_set_smoke_test
                         , { "routing_tables": [
