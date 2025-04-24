@@ -252,22 +252,25 @@ def test_iccom_sk_data_comm_with_transport_level(params, get_test_info=False):
                 sock.bind((ch, 0))
                 sock.send(create_netlink_msg(data_snd, 1))
 
-                iccom.check_wire_xfer(te.test_transport_name()
-                                        , iccom.iccom_package(1, bytearray(), te.curr_dpkg_size())
-                                        , iccom.iccom_package(0, bytearray(), te.curr_dpkg_size())
+                idx = iccom.check_wire_xfer(te.test_transport_name()
+                                        , iccom.iccom_package(0
+                                                , iccom.iccom_packet(ch, data_rcv, True), te.curr_dpkg_size())
+                                        , [iccom.iccom_package(0, bytearray(), te.curr_dpkg_size())
+                                           , iccom.iccom_package(1
+                                                , iccom.iccom_packet(ch, data_snd, True), te.curr_dpkg_size())]
                                 , None, None, "first data frame")
                 iccom.check_wire_xfer_ack(te.test_transport_name()
                                         , None, None, "first ack frame")
 
                 # Actual data xfer
-                iccom.check_wire_xfer(te.test_transport_name()
-                                , iccom.iccom_package(2
-                                        , iccom.iccom_packet(ch, data_rcv, True), te.curr_dpkg_size())
-                                , iccom.iccom_package(1
-                                        , iccom.iccom_packet(ch, data_snd, True), te.curr_dpkg_size())
-                                , None , None, "second data frame")
-                iccom.check_wire_xfer_ack(te.test_transport_name()
-                                , None, None, "second ack frame")
+                if idx == 0:
+                        iccom.check_wire_xfer(te.test_transport_name()
+                                        , iccom.iccom_package(1, bytearray(), te.curr_dpkg_size())
+                                        , iccom.iccom_package(1
+                                                        , iccom.iccom_packet(ch, data_snd, True), te.curr_dpkg_size())
+                                        , None , None, "second data frame")
+                        iccom.check_wire_xfer_ack(te.test_transport_name()
+                                        , None, None, "second ack frame")
 
                 # Try to Read 1024 bytes --> We expect way less in fact
                 extracted_data = extract_netlink_data(sock.recv(1024))
@@ -472,7 +475,8 @@ def test_iccom_sk_routing_set_smoke_test(
 #
 # @te IccomTestEnv
 # @params the test params dictionary, test_iccom_skif_routing_primitive.
-# @transport_frame transport frame index to start from
+# @transport_frame {"tx": NUM, "rx": NUM} transport frame index dict to
+#       start from
 # @us_sockets dictionary of channel_nr -> socket
 # @expected_upcast_ch_list where to expect data to pop in us
 # @expected_downcast_ch_list where to expect data to pop at the bottom
@@ -482,6 +486,11 @@ def __routing_primitive_test_helper(
                 te, params, transport_frame, us_sockets
                 , expected_upcast_ch_list, expected_downcast_ch_list):
 
+        if params["initial_direction"] == "upwards":
+                return __routing_primitive_test_helper_in_upwards(
+                                te, params, transport_frame, us_sockets
+                                , expected_upcast_ch_list, expected_downcast_ch_list)
+
         # iccom sorts internally the actions, so to make it proper without
         # parsing the packages, let's just sort it as well
         expected_downcast_ch_list = sorted(expected_downcast_ch_list)
@@ -490,34 +499,16 @@ def __routing_primitive_test_helper(
         in_ch = params["msg_inbound_channel"]
         msg_data = params["msg_data"]
 
+        # the optimized version when iccom replaces the idle package
+        expected_wire_data_optimized_1 = bytearray()
+        expected_wire_data_optimized_2 = bytearray()
+        for ch in expected_downcast_ch_list[0:1]:
+                expected_wire_data_optimized_1 += iccom.iccom_packet(ch, msg_data, True)
+        for ch in expected_downcast_ch_list[1:]:
+                expected_wire_data_optimized_2 += iccom.iccom_packet(ch, msg_data, True)
+
         # send the inbound msg data
-
-        if in_direction == "upwards":
-                # incoming direction upwards
-
-                # idle first xfer
-                iccom.check_wire_xfer(te.test_transport_name()
-                                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
-                                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
-                                , None, None, "idle prerouting data frame")
-                iccom.check_wire_xfer_ack(te.test_transport_name()
-                                        , None, None, "idle prerouting ack frame")
-                transport_frame = (transport_frame + 1) % 0x100
-
-                # actual data xfer
-                iccom.check_wire_xfer(te.test_transport_name()
-                        , iccom.iccom_package(transport_frame
-                                        , iccom.iccom_packet(in_ch, msg_data, True), te.curr_dpkg_size())
-                        , iccom.iccom_package(transport_frame
-                                        , bytearray(), te.curr_dpkg_size())
-                        , None , None, "prerouting data frame")
-                iccom.check_wire_xfer_ack(te.test_transport_name()
-                                        , None, None, "prerouting ack frame")
-                transport_frame = (transport_frame + 1) % 0x100
-        else:
-                # incoming direction downwards
-
-                us_sockets[in_ch].send(create_netlink_msg(msg_data, 1))
+        us_sockets[in_ch].send(create_netlink_msg(msg_data, 1))
 
         # expect all upcast channels read the message data
 
@@ -553,24 +544,137 @@ def __routing_primitive_test_helper(
 
         # direction downwards also means that we shall start the bottom
         # communication here from scratch
-        if in_direction == "downwards":
-                iccom.check_wire_xfer(te.test_transport_name()
-                                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
-                                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
-                                , None, None, "idle data frame")
-                iccom.check_wire_xfer_ack(te.test_transport_name()
-                                        , None, None, "idle ack frame")
-                transport_frame = (transport_frame + 1) % 0x100
+        idx = iccom.check_wire_xfer(te.test_transport_name()
+                        , iccom.iccom_package(transport_frame["tx"], bytearray(), te.curr_dpkg_size())
+                        , [
+                             iccom.iccom_package(transport_frame["rx"], bytearray(), te.curr_dpkg_size())
+                             , iccom.iccom_package((transport_frame["rx"] + 1) % 0x100, expected_wire_data, te.curr_dpkg_size())
+                             , iccom.iccom_package((transport_frame["rx"] + 1) % 0x100, expected_wire_data_optimized_1, te.curr_dpkg_size())
+                          ]
+                        , None, None, "idle data frame")
+        iccom.check_wire_xfer_ack(te.test_transport_name()
+                                , None, None, "idle ack frame")
+        transport_frame["rx"] = (transport_frame["rx"] + (1 if idx == 0 else 2)) % 0x100
+        transport_frame["tx"] = (transport_frame["tx"] + 1) % 0x100
 
+        # non-optimized sendout
+        if idx == 0:
+                iccom.check_wire_xfer(te.test_transport_name()
+                        , iccom.iccom_package(transport_frame["tx"], bytearray(), te.curr_dpkg_size())
+                        , iccom.iccom_package(transport_frame["rx"], expected_wire_data, te.curr_dpkg_size())
+                        , None , None, "routed data frame")
+                iccom.check_wire_xfer_ack(te.test_transport_name()
+                                        , None, None, "routed ack frame")
+
+                transport_frame["rx"] = (transport_frame["rx"] + 1) % 0x100
+                transport_frame["tx"] = (transport_frame["tx"] + 1) % 0x100
+
+        # optimized sendout
+        if idx == 2:
+                iccom.check_wire_xfer(te.test_transport_name()
+                        , iccom.iccom_package(transport_frame["tx"], bytearray(), te.curr_dpkg_size())
+                        , iccom.iccom_package(transport_frame["rx"], expected_wire_data_optimized_2, te.curr_dpkg_size())
+                                        , None , None, "routed data frame")
+                iccom.check_wire_xfer_ack(te.test_transport_name()
+                                        , None, None, "routed ack frame")
+
+                transport_frame["rx"] = (transport_frame["rx"] + 1) % 0x100
+                transport_frame["tx"] = (transport_frame["tx"] + 1) % 0x100
+
+        return transport_frame
+
+def __routing_primitive_test_helper_in_upwards(
+                te, params, transport_frame, us_sockets
+                , expected_upcast_ch_list, expected_downcast_ch_list):
+
+        # iccom sorts internally the actions, so to make it proper without
+        # parsing the packages, let's just sort it as well
+        expected_downcast_ch_list = sorted(expected_downcast_ch_list)
+
+        in_ch = params["msg_inbound_channel"]
+        msg_data = params["msg_data"]
+
+        # the optimized version when iccom replaces the idle package
+        expected_wire_data_optimized_1 = bytearray()
+        expected_wire_data_optimized_2 = bytearray()
+        for ch in expected_downcast_ch_list[0:1]:
+                expected_wire_data_optimized_1 += iccom.iccom_packet(ch, msg_data, True)
+        for ch in expected_downcast_ch_list[1:]:
+                expected_wire_data_optimized_2 += iccom.iccom_packet(ch, msg_data, True)
+
+        # send the inbound msg data
+
+        # incoming direction upwards
         iccom.check_wire_xfer(te.test_transport_name()
-                , iccom.iccom_package(transport_frame, bytearray(), te.curr_dpkg_size())
-                , iccom.iccom_package(transport_frame, expected_wire_data, te.curr_dpkg_size())
+                        , iccom.iccom_package(transport_frame["tx"]
+                             , iccom.iccom_packet(in_ch, msg_data, True), te.curr_dpkg_size())
+                        , iccom.iccom_package(transport_frame["rx"], bytearray(), te.curr_dpkg_size())
+                        , None, None, "initial data/idle frame")
+        iccom.check_wire_xfer_ack(te.test_transport_name()
+                                , None, None, "idle prerouting ack frame")
+        transport_frame["rx"] = (transport_frame["rx"] + 1) % 0x100
+        transport_frame["tx"] = (transport_frame["tx"] + 1) % 0x100
+
+        # expect all upcast channels read the message data
+
+        for ch in expected_upcast_ch_list:
+                sock = us_sockets[ch]
+                try:
+                        extracted_data = extract_netlink_data(sock.recv(1024))
+                except:
+                        raise RuntimeError("Failed to read data from"
+                                        " iccom socket #%d (timeout)" % ch)
+
+                if msg_data != extracted_data:
+                        raise RuntimeError("NL msg from"
+                        " iccom socket #%d != expected:\n"
+                        "    (expected) %s \n"
+                        "    (received) %s \n"
+                        % (msg_data, extracted_data))
+
+        if len(expected_downcast_ch_list) == 0:
+                return transport_frame
+
+        # Check downward data
+
+        # NOTE: there is no need for now to generate a full-blown
+        #       multi-packages interaction, like real iccom does,
+        #       so we're limited now here to data which fits into
+        #       single data package.
+
+        expected_wire_data = bytearray()
+
+        for ch in expected_downcast_ch_list:
+                expected_wire_data += iccom.iccom_packet(ch, msg_data, True)
+
+        idx = iccom.check_wire_xfer(te.test_transport_name()
+                , iccom.iccom_package(transport_frame["tx"], bytearray(), te.curr_dpkg_size())
+                , [
+                    iccom.iccom_package(transport_frame["rx"], expected_wire_data, te.curr_dpkg_size())
+                    , iccom.iccom_package((transport_frame["rx"] + 1) % 0x100, expected_wire_data_optimized_1, te.curr_dpkg_size())
+                  ]
                 , None , None, "routed data frame")
         iccom.check_wire_xfer_ack(te.test_transport_name()
                                 , None, None, "routed ack frame")
-        transport_frame = (transport_frame + 1) % 0x100
+
+        transport_frame["rx"] = (transport_frame["rx"] + (1 if idx == 0 else 2)) % 0x100
+        transport_frame["tx"] = (transport_frame["tx"] + 1) % 0x100
+
+        # partial optimized sendout
+        if idx == 1:
+                iccom.check_wire_xfer(te.test_transport_name()
+                        , iccom.iccom_package(transport_frame["tx"], bytearray(), te.curr_dpkg_size())
+                        , iccom.iccom_package(transport_frame["rx"], expected_wire_data_optimized_2, te.curr_dpkg_size())
+                        , None , None, "routed data frame")
+                iccom.check_wire_xfer_ack(te.test_transport_name()
+                                        , None, None, "routed ack frame")
+
+                transport_frame["rx"] = (transport_frame["rx"] + 1) % 0x100
+                transport_frame["tx"] = (transport_frame["tx"] + 1) % 0x100
+
 
         return transport_frame
+
 
 # * Set routing for THE channel (either incoming from bottom, or from top).
 #   NOTE: routing can be to anywhere
@@ -635,7 +739,7 @@ def test_iccom_skif_routing_primitive(params, get_test_info=False):
                 if in_direction == "downwards" and in_ch not in us_ch_list:
                         us_ch_list.append(in_ch)
 
-                transport_frame = 0
+                transport_frame =  {"tx": 0, "rx": 0}
 
                 try:
                         # getting sockets in us

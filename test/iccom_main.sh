@@ -24,4 +24,7 @@ check_iccom_tty_basic_io
 rmmod iccom_socket_if
 rmmod iccom
 rmmod fd_test_transport
+
+echo "=== ARM KERNEL LOG BEGIN ==="
 dmesg
+echo "=== ARM KERNEL LOG END ==="

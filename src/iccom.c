@@ -489,10 +489,10 @@ void iccom_test_sysfs_ch_del(struct iccom_dev *iccom);
 
 
 bool __iccom_package_check_unused_payload(
-		struct iccom_package *package, uint8_t symbol);
+		const struct iccom_package *package, uint8_t symbol);
 
 #ifdef ICCOM_DEBUG
-static void iccom_dbg_printout_package(struct iccom_package *pkg);
+static void iccom_dbg_printout_package(const struct iccom_package *pkg);
 static void iccom_dbg_printout_tx_queue(struct iccom_dev *iccom
 		, int max_printout_count);
 void iccom_dbg_printout_xfer(const struct full_duplex_xfer *const xfer);
@@ -896,6 +896,15 @@ struct iccom_error_rec {
 	unsigned int err_per_sec_threshold;
 };
 
+// Holds the dynamic configuration of the iccom.
+// @replace_empty_tx_package try to replace the idle (empty) package
+//		upon getting a new message to send. Normally this shall be
+//		true by default and disabled only if transport has some
+//		issues with replacement.
+struct iccom_config {
+	bool replace_empty_tx_package;
+};
+
 // Describes the internal ICCom data
 // @iccom pointer to corresponding iccom_dev structure.
 // @tx_data_packages_head the list of data packages (struct iccom_package)
@@ -998,6 +1007,7 @@ struct iccom_error_rec {
 //      races.
 // @pdev The platform device we register on creation.
 //    It works only for linking between devices (ICCom and, say, transport).
+// @cfg the iccom device dynamic configuration.
 struct iccom_dev_private {
 	struct iccom_dev *iccom;
 
@@ -1038,6 +1048,8 @@ struct iccom_dev_private {
 	struct mutex sysfs_test_ch_lock;
 
 	struct platform_device *pdev; 
+
+	struct iccom_config cfg;
 };
 
 /* ------------------------ GLOBAL VARIABLES ----------------------------*/
@@ -1553,7 +1565,7 @@ uint32_t __iccom_compute_crc32_iso_hdlc_padding_optimized(
 // already occupied with some payload.
 // See @iccom_package description.
 static inline size_t __iccom_package_payload_room_size(
-		struct iccom_package *package)
+		const struct iccom_package *package)
 {
 	return package->size
 		- ICCOM_PACKAGE_HEADER_SIZE_BYTES
@@ -1569,7 +1581,7 @@ static inline void __iccom_package_set_payload_size(
 
 // Helper. Gets the package payload length. See @iccom_package description.
 static inline size_t __iccom_package_payload_size(
-		struct iccom_package *package, bool *ok__out)
+		const struct iccom_package *package, bool *ok__out)
 {
 	size_t declared_size = (size_t)__be16_to_cpu(*((__be16*)package->data));
 	size_t max_possible = __iccom_package_payload_room_size(package);
@@ -1594,7 +1606,7 @@ static inline size_t __iccom_package_is_empty(
 
 // Helper. Returns the pointer to the first byte of the payload.
 static inline void *__iccom_package_payload_start_addr(
-		struct iccom_package *package)
+		const struct iccom_package *package)
 {
 	return package->data
 		+ ICCOM_PACKAGE_PAYLOAD_DATA_LENGTH_FIELD_SIZE_BYTES
@@ -1604,7 +1616,7 @@ static inline void *__iccom_package_payload_start_addr(
 // Helper. Gets the size of package free space for payload (in bytes).
 // See @iccom_package description.
 static inline size_t __iccom_package_get_payload_free_space(
-		struct iccom_package *package, bool *ok__out)
+		const struct iccom_package *package, bool *ok__out)
 {
 	return __iccom_package_payload_room_size(package)
 	       - __iccom_package_payload_size(package, ok__out);
@@ -1635,7 +1647,7 @@ static inline void __iccom_package_set_src(
 
 // Helper. Gets the package SRC. See @iccom_package description.
 static inline unsigned int __iccom_package_get_src(
-		struct iccom_package *package)
+		const struct iccom_package *package)
 {
 	int src_offset = package->size - ICCOM_PACKAGE_CRC_FIELD_SIZE_BYTES;
 	return *((uint32_t *)(package->data + src_offset));
@@ -1646,7 +1658,7 @@ static inline unsigned int __iccom_package_get_src(
 //
 // NOTE: if no free spage returns NULL
 static inline void * __iccom_package_get_free_space_start_addr(
-		struct iccom_package *package, bool *ok__out)
+		const struct iccom_package *package, bool *ok__out)
 {
 	size_t free_length = __iccom_package_get_payload_free_space(
 						   package, ok__out);
@@ -1685,7 +1697,7 @@ static void __iccom_package_fill_unused_payload(
 //          given symbol)
 //      false: else
 bool __iccom_package_check_unused_payload(
-		struct iccom_package *package, uint8_t symbol)
+		const struct iccom_package *package, uint8_t symbol)
 {
 	// See @iccom_package description.
 	bool ok = false;
@@ -1766,7 +1778,7 @@ static inline struct iccom_package *__iccom_get_last_tx_package(
 // RETURNS:
 //      computed CRC32 value
 static unsigned int __iccom_package_compute_src(
-	struct iccom_package *package)
+	const struct iccom_package *package)
 {
 	const size_t payload_size = __iccom_package_payload_size(package, NULL);
 	const size_t padding_size = __iccom_package_payload_room_size(package) - payload_size;
@@ -1864,7 +1876,7 @@ static void __iccom_package_make_empty(struct iccom_package *package)
 }
 
 #ifdef ICCOM_DEBUG
-static void iccom_dbg_printout_package(struct iccom_package *pkg)
+static void iccom_dbg_printout_package(const struct iccom_package *pkg)
 {
 	ICCOM_CHECK_PTR(pkg, return);
 
@@ -3684,6 +3696,13 @@ static inline int iccom_msg_storage_uncommitted_finalized_count(
 /* -------------------------- UTILITIES ---------------------------------*/
 
 // Helper.
+// Initializes the iccom dynamic config
+static void __iccom_config_init(struct iccom_dev *iccom)
+{
+	iccom->p->cfg.replace_empty_tx_package = true;
+}
+
+// Helper.
 // Initializes the report error array.
 static void __iccom_error_report_init(struct iccom_dev *iccom)
 {
@@ -4043,7 +4062,7 @@ static int __iccom_enqueue_empty_tx_data_package(struct iccom_dev *iccom)
 
 // Helper. Returns true if the package checksum is correct.
 static inline bool __iccom_verify_package_crc(
-	struct iccom_package *package)
+	const struct iccom_package *package)
 {
 	return __iccom_package_get_src(package)
 		    == __iccom_package_compute_src(package);
@@ -4055,7 +4074,7 @@ static inline bool __iccom_verify_package_crc(
 // RETURNS:
 //      package is ok: the package payload size >= 0
 //      else: -1
-static int __iccom_verify_package_data(struct iccom_package *package)
+static int __iccom_verify_package_data(const struct iccom_package *package)
 {
 	bool pkg_ok;
 	size_t payload_size = __iccom_package_payload_size(package, &pkg_ok);
@@ -4087,10 +4106,14 @@ static int __iccom_verify_package_data(struct iccom_package *package)
 // Helper. Fills up the full_duplex_xfer data structure to make a
 // full-duplex data xfer for the first pending data package in TX queue.
 //
+// @xfer the xfer to fill up
+// @src_pkg if NULL, then first TX package will be used, else a given one.
+//
 // NOTE: surely the first package in TX queue should be finalized before
 //      this call
 static void __iccom_fillup_next_data_xfer(struct iccom_dev *iccom
-					  , struct full_duplex_xfer *xfer)
+		, struct full_duplex_xfer *xfer
+		, const struct iccom_package *src_pkg)
 {
 #ifdef ICCOM_DEBUG
 	ICCOM_CHECK_DEVICE("", return);
@@ -4104,7 +4127,9 @@ static void __iccom_fillup_next_data_xfer(struct iccom_dev *iccom
 	}
 #endif
 
-	struct iccom_package *src_pkg = __iccom_get_first_tx_package(iccom);
+	if (src_pkg == NULL) {
+		src_pkg = __iccom_get_first_tx_package(iccom);
+	}
 
 #ifdef ICCOM_DEBUG
 	if (IS_ERR_OR_NULL(src_pkg)) {
@@ -4156,11 +4181,17 @@ static inline bool __iccom_verify_ack(struct iccom_package *package)
 // To be called when the first in TX queue package xfer was
 // proven to be done successfully (its ACK was received).
 //
+// @tx_already_locked if set to true, then the routine will
+//		not lock the tx queue mutex assuming that it is already
+//		locked. Caller is then responsible to lock tx queue
+//		lock.
+//
 // NOTE: thread safe
 //
 // RETURNS:
 //      if there is a non-empty package for xfer from our side.
-static bool __iccom_queue_step_forward(struct iccom_dev *iccom)
+static bool __iccom_queue_step_forward(struct iccom_dev *iccom
+		, const bool tx_already_locked)
 {
 #ifdef ICCOM_DEBUG
 	ICCOM_CHECK_DEVICE("", return false);
@@ -4174,7 +4205,10 @@ static bool __iccom_queue_step_forward(struct iccom_dev *iccom)
 	// this function is called indirectly by transport layer below,
 	// while the TX queue can be updated independently by the
 	// consumer, so need mutex here for protection
-	mutex_lock(&iccom->p->tx_queue_lock);
+
+	if (!tx_already_locked) {
+		mutex_lock(&iccom->p->tx_queue_lock);
+	}
 
 	struct iccom_package *delivered_package
 			     = __iccom_get_first_tx_package(iccom);
@@ -4210,12 +4244,16 @@ static bool __iccom_queue_step_forward(struct iccom_dev *iccom)
 
 	have_data = false;
 finalize:
-	mutex_unlock(&iccom->p->tx_queue_lock);
+	if (!tx_already_locked) {
+		mutex_unlock(&iccom->p->tx_queue_lock);
+	}
 	return have_data;
 }
 
 // Helper. Enqueues given message into the queue. Adds as many
 // packages as needed.
+// @data {valid data ptr}
+// @length {>0}
 //
 // CONCURRENCE: thread safe
 //
@@ -4254,12 +4292,6 @@ static int __iccom_queue_append_message(struct iccom_dev *iccom
 	// so if only one package left we will simply add a brand
 	// new one
 	if (!__iccom_have_multiple_packages(iccom)) {
-		// TODO: we can consider to update first package
-		// if its xfer have not yet began, to do this we need
-		// to create its updated memory in separate place,
-		// and then try to update the xfer data on transport
-		// layer device, and if succeeded, then we may put
-		// this data into the first package.
 		res = __iccom_enqueue_new_tx_data_package(iccom);
 		if (res < 0) {
 			iccom_err("Could not post message: err %d", res);
@@ -4292,6 +4324,56 @@ static int __iccom_queue_append_message(struct iccom_dev *iccom
 			iccom_err("Could not post message: err %d"
 				  , res);
 			goto finalize;
+		}
+	}
+
+	if (iccom->p->cfg.replace_empty_tx_package) {
+		// By this time we have at least 2 packages in tx queue.
+		// We have enqueued all the data (length != 0) at this point, and
+		// now if the first (under xfer) package is empty we
+		// attempt to replace it with one with payload, to avoid
+		// wasting the bandwidth by sending an empty package.
+		struct iccom_package *first_pkg = __iccom_get_first_tx_package(iccom);
+
+		// NOTE: all checks except for payload size are only for performance
+		//		reasons, they are not guaranteed to be consistent in general,
+		//		but they will on average save us time by avoiding trying to
+		//		update xfer when it can not be done. If those pass it is highly
+		//		likely that we will succeed with data update.
+		// NOTE: reason for updating only 0-sized packages is that for now the
+		//		ICCom is aimed at the fastest delivery so, immediately as the
+		//		first message is put into the first package this package gets
+		//		sent, so idling on transport layer is only possible when there is
+		//		nothing to send from our side.
+		if (__iccom_package_payload_size(first_pkg, NULL) == 0
+				&& iccom->p->data_xfer_stage) {
+
+			struct iccom_package *second_pkg = __iccom_get_package_from_list_anchor(
+					iccom->p->tx_data_packages_head.next->next);
+
+			// second pkg is the last one, so yet to be finalized
+			if (iccom->p->tx_data_packages_head.next->next->next
+					== &(iccom->p->tx_data_packages_head)) {
+				__iccom_package_finalize(second_pkg);
+			}
+
+			struct full_duplex_xfer override_xfer;
+			__iccom_fillup_next_data_xfer(iccom, &override_xfer, second_pkg);
+
+			// NOTE: until xfer done handler is done, the data update will not
+			//	succeed, so we can rely on the tx_queue_lock mutex here for sync.
+			// NOTE: the xfer fields will be copied into the transport driver,
+			//	so no need to safe them anyhow.
+			// NOTE: the size change set to false will protect us from
+			//	changing the ack/nack xfer to data.
+			int xres = iccom->xfer_iface.default_data_update(iccom->xfer_device
+									, &override_xfer, false);
+
+			// only if the update succeeded, we drop the first package
+			if (xres >= 0) {
+				__iccom_queue_step_forward(iccom, true);
+				iccom->p->xfer = override_xfer;
+			}
 		}
 	}
 
@@ -4676,7 +4758,7 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 	if (__iccom_verify_ack(&rx_pkg)) {
 		iccom->p->statistics.packages_sent_ok++;
 		// TODO to schedule only if at least one message finalized
-		*start_immediately__out = __iccom_queue_step_forward(iccom);
+		*start_immediately__out = __iccom_queue_step_forward(iccom, false);
 	} else {
 		// We must resend the failed package immediately.
 		// TODO: probably we may avoid resending the empty
@@ -4685,7 +4767,7 @@ struct full_duplex_xfer *__iccom_xfer_done_callback(
 	}
 
 	// preparing the next xfer with the first pending package in queue
-	__iccom_fillup_next_data_xfer(iccom, &iccom->p->xfer);
+	__iccom_fillup_next_data_xfer(iccom, &iccom->p->xfer, NULL);
 
 finalize:
 	// switching to other stage (the only point where the
@@ -5345,6 +5427,7 @@ int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
 
 	__iccom_statistics_init(iccom);
 	__iccom_error_report_init(iccom);
+	__iccom_config_init(iccom);
 
 	res = iccom_msg_storage_init(&iccom->p->rx_messages);
 	if (res < 0) {
@@ -5378,7 +5461,7 @@ int iccom_init(struct iccom_dev *iccom, struct platform_device *pdev)
 		goto free_pkg_storage;
 	}
 
-	__iccom_fillup_next_data_xfer(iccom, &iccom->p->xfer);
+	__iccom_fillup_next_data_xfer(iccom, &iccom->p->xfer, NULL);
 	iccom->p->data_xfer_stage = true;
 
 	// init workqueue for delivery to consumer
@@ -6409,6 +6492,67 @@ wrong_usage:
 
 static DEVICE_ATTR_WO(channels_ctl);
 
+
+// Sysfs ctl for idle tx package replacement policy.
+//
+// If the value is 0, then iccom will not replace the
+// idling empty tx package on the transport layer,
+static ssize_t replace_empty_tx_package_store(
+		struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
+
+	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
+	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
+
+	if (buf[count] != 0) {
+		return -EFAULT;
+	}
+
+	uint32_t val;
+	const int args_count = sscanf(buf, "%u", &val);
+	if (args_count != 1) {
+		iccom_err("to enable replacement of the empty tx package"
+		          " write any positive integer here, to disable"
+				  " write 0.");
+		return -EINVAL;
+	}
+
+	iccom->p->cfg.replace_empty_tx_package = (val != 0);
+
+	if (val != 0) {
+		iccom_info(ICCOM_LOG_INFO_KEY_LEVEL
+			, "enabled empty tx pkg replacement");
+	} else {
+		iccom_info(ICCOM_LOG_INFO_KEY_LEVEL
+			, "disabled empty tx pkg replacement");
+	}
+
+	return count;
+}
+
+// Sysfs show for idle tx package replacement policy.
+//
+// Show if iccom will replace the statistics
+static ssize_t replace_empty_tx_package_show(
+		struct device *dev, struct device_attribute *attr, char *buf)
+{
+	ICCOM_CHECK_PTR(buf, return -EINVAL);
+
+	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(dev);
+
+	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
+	ICCOM_CHECK_DEVICE_PRIVATE("broken device data", return -EINVAL);
+
+	return scnprintf(buf, PAGE_SIZE, "%d"
+				, iccom->p->cfg.replace_empty_tx_package ? 1 : 0);
+}
+
+static DEVICE_ATTR_RW(replace_empty_tx_package);
+
 // List containing default attributes that an
 // iccom device can have.
 //
@@ -6422,6 +6566,7 @@ static struct attribute *iccom_dev_attrs[] = {
 	&dev_attr_channels_ctl.attr,
 	&dev_attr_channels_RW.attr,
 	&dev_attr_data_package_size.attr,
+	&dev_attr_replace_empty_tx_package.attr,
 	NULL,
 };
 
@@ -6463,6 +6608,16 @@ static int iccom_device_tree_node_setup(struct platform_device *pdev,
 		iccom_err("Transport device data iface is null.");
 		return -EFAULT;
 	}
+
+	// configuration area (the hardcoded default config shall
+	// be ready by this point, so we use it as default values)
+	uint8_t val = iccom->p->cfg.replace_empty_tx_package ? 1 : 0;
+	of_property_read_u8(iccom_dt_node
+				       , "replace_empty_tx_package"
+				       , &val);
+	iccom->p->cfg.replace_empty_tx_package = (val != 0);
+	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL, "cfg: idle tx package replacement: %s"
+			   , iccom->p->cfg.replace_empty_tx_package ? "on" : "off");
 
 	int ret = __iccom_bind_xfer_device(&pdev->dev
 					, full_duplex_dev->iface

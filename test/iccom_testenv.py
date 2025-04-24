@@ -154,17 +154,27 @@ class IccomTestEnv:
         # @te IccomTestEnv
         def iccom_check_simple_write(self, channel, data):
                 # Do (Default xfer) Data Exchange + NACK
-                check_wire_xfer(self.test_transport_name()
+                res = check_wire_xfer(self.test_transport_name()
                                 , iccom_package(self.inbound_package_num
                                                 , bytearray(), self.curr_dpkg_size())
-                                , iccom_package(self.outbound_package_num
+                                , [
+                                        iccom_package(self.outbound_package_num
                                                 , bytearray(), self.curr_dpkg_size())
+                                        , iccom_package((self.outbound_package_num + 1) % 0x100
+                                                , iccom_packet(channel
+                                                , data
+                                                , True), self.curr_dpkg_size())
+                                  ]
                                 , None, None, "first data frame")
                 check_wire_xfer_ack(self.test_transport_name()
                                         , None, None, "first ack frame")
 
-                self.inbound_package_num += 1
-                self.outbound_package_num += 1
+                self.inbound_package_num = (self.inbound_package_num + 1) % 0x100
+                self.outbound_package_num = (self.outbound_package_num + 1 if res == 0 else 2) % 0x100
+
+                if (res == 1):
+                        # all was already done
+                        return
         
                 # ICCom sends correct data, but we complain that we have not
                 # received it properly

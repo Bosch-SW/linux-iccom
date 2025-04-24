@@ -62,6 +62,29 @@ def link_fd_test_transport_device_to_iccom_device(
     command = transport_dev
     write_sysfs_file(file, command, err_expectation)
 
+# Configure if the iccom should replace idle package on
+# transport layer or not.
+#
+# @iccom_dev {string} iccom device name
+# @replace {bool} to replace or not
+# @err_expectation {number} the errno which is expected
+#                           to be caught. Example: None, errno.EIO, ...
+def set_idle_package_replace_policy(iccom_dev, replace, err_expectation):
+    file = "/sys/devices/platform/%s/replace_empty_tx_package" % (iccom_dev)
+    command = "1" if replace else "0"
+    write_sysfs_file(file, command, err_expectation)
+
+# Get idle package replacement policy.
+#
+# @iccom_dev {string} iccom device name
+# @err_expectation {number} the errno which is expected
+#                           to be caught. Example: None, errno.EIO, ...
+#
+# RETURNS: bool if policy is set or not
+def get_idle_package_replace_policy(iccom_dev, err_expectation):
+    file = "/sys/devices/platform/%s/replace_empty_tx_package" % (iccom_dev)
+    return (read_sysfs_file(file, err_expectation) == "1")
+
 # Create an iccom sysfs channel and propagate
 # the error expectations
 #
@@ -153,8 +176,13 @@ def iccom_sysfs_read(iccom_dev, channel, err_expectation):
 # @data bytearray to write to wire
 # @err_expectation {number} the errno which is expected
 #                           to be caught. Example: None, errno.EIO, ...
-def write_to_wire(transport_dev, data, err_expectation):
-    print("iccom_test: simulated wire data: %s" % (data.hex(),))
+# @com_log {None or the dict with entry "log"} here the log of the
+#   op shall be written if provided
+def write_to_wire(transport_dev, data, err_expectation, com_log=None):
+    if com_log is not None:
+        if "log" not in com_log:
+            com_log["log"] = ""
+        com_log["log"] += ("iccom_test: simulated wire data: %s" % (data.hex(),)) + "\n"
     file = "/sys/devices/platform/%s/transport_RW" % (transport_dev)
     command = data.hex()
     write_sysfs_file(file, command, err_expectation)
@@ -165,13 +193,18 @@ def write_to_wire(transport_dev, data, err_expectation):
 # @transport_dev {string} full duplex test device name
 # @err_expectation {number} the errno which is expected
 #                           to be caught. Example: None, errno.EIO, ...
+# @com_log {None or the dict with entry "log"} here the log of the
+#   op shall be written if provided
 #
 # RETURNS: the bytarray of wire data sent by ICCom to the wire
-def read_from_wire(transport_dev, err_expectation):
+def read_from_wire(transport_dev, err_expectation, com_log=None):
     file = "/sys/devices/platform/%s/transport_RW" % (transport_dev)
     output = read_sysfs_file(file, err_expectation)
     result = bytearray.fromhex(output)
-    print("iccom_test: received wire data: %s" % (result.hex(),))
+    if com_log is not None:
+        if "log" not in com_log:
+            com_log["log"] = ""
+        com_log["log"] += ("iccom_test: received wire data: %s" % (result.hex(),)) + "\n"
     return result
 
 # Performs the full duplex xfer on wire
@@ -182,12 +215,15 @@ def read_from_wire(transport_dev, err_expectation):
 #                           to be caught. Example: None, errno.EIO, ...
 # @error_W_expectation {number} the errno which is expected
 #                           to be caught. Example: None, errno.EIO, ...
+# @com_log {None or the dict with entry "log"} here the log of the
+#   op shall be written if provided
 #
 # RETURNS: the received data as bytearray
-def wire_xfer(transport_dev, send_data, error_R_expectation, error_W_expectation):
-    write_to_wire(transport_dev, send_data, error_W_expectation)
+def wire_xfer(transport_dev, send_data, error_R_expectation, error_W_expectation
+              , com_log=None):
+    write_to_wire(transport_dev, send_data, error_W_expectation, com_log)
     sleep(0.1)
-    return read_from_wire(transport_dev, error_R_expectation)
+    return read_from_wire(transport_dev, error_R_expectation, com_log)
 
 # Does the wire full duplex xfer and checks if the
 # received data matches expected
@@ -208,8 +244,9 @@ def wire_xfer(transport_dev, send_data, error_R_expectation, error_W_expectation
 def check_wire_xfer(transport_dev, send_data, expected_rcv_data
                     , error_R_expectation, error_W_expectation
                     , log_msg=""):
+    com_log = {}
     rcv_data = wire_xfer(transport_dev, send_data, error_R_expectation
-                         , error_W_expectation)
+                         , error_W_expectation, com_log)
 
     expected_rcv_data_list = (expected_rcv_data
                               if isinstance(expected_rcv_data, list)
@@ -225,6 +262,12 @@ def check_wire_xfer(transport_dev, send_data, expected_rcv_data
     if not match:
         expected_str = ""
         i = 0
+
+        print("*** failed sequence ***")
+        if "log" in com_log:
+            print(com_log["log"])
+        print("*** failed sequence end ***")
+
         for expected_data in expected_rcv_data_list:
             expected_str += ("    expected (v%d): %s\n"
                             % (i, expected_data.hex(),))
