@@ -1,10 +1,5 @@
-import subprocess
 import zlib
 from time import sleep
-import errno
-import os
-import string
-import random
 
 from sysfs import *
 
@@ -232,7 +227,7 @@ def check_wire_xfer(transport_dev, send_data, expected_rcv_data
         i = 0
         for expected_data in expected_rcv_data_list:
             expected_str += ("    expected (v%d): %s\n"
-                            % (i, expected_rcv_data.hex(),))
+                            % (i, expected_data.hex(),))
             i += 1
 
         raise RuntimeError(

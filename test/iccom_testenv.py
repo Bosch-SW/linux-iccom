@@ -1,10 +1,5 @@
-import subprocess
-import zlib
 from time import sleep
-import errno
 import os
-import string
-import random
 import glob
 
 from iccom import *

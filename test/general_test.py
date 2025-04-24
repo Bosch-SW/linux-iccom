@@ -1,4 +1,5 @@
 import string
+import traceback
 
 class GeneralTest:
 
@@ -114,5 +115,6 @@ class GeneralTest:
 
                 print("%s: FAILED: %s (test description: %s)"
                       % (str(test_id), str(e), str(test_descr)))
+                print(traceback.format_exc())
 
                 self.append_report(test_id, False)

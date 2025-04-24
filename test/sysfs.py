@@ -1,10 +1,5 @@
-import subprocess
-import zlib
 from time import sleep
-import errno
 import os
-import string
-import random
 
 # Read a sysfs file and handle expectations
 # within the function by raising errors when errors

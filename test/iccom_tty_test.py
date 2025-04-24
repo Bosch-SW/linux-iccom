@@ -73,7 +73,7 @@ class IccomTty:
         major_num = None
         minor_num = None
         with open("%s/dev" % (self.sysfs_dev_dir())) as f:
-            match = re.match("\s*(\d+)\s*:\s*(\d+)\s*", f.readline())
+            match = re.match(r"\s*(\d+)\s*:\s*(\d+)\s*", f.readline())
             if match is None:
                  raise Exception("failed to read major and minor numbers for %s"
                                  % (self.sysfs_dev_dir(),))
