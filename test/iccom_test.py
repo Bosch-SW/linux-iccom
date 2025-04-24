@@ -1,5 +1,4 @@
 import subprocess
-import zlib
 from time import sleep
 import errno
 import os

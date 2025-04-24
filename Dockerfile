@@ -15,8 +15,15 @@ ARG kernel_source_dir_arm=/repos/linux_arm/
 ENV repo_path=/repos/linux-iccom
 RUN rm -rf ${repo_path} && mkdir -p ${repo_path}
 
+# allow python find extra modules
+RUN echo 'export PYTHONPATH=${PYTHONPATH}:/py_mods' \
+            >> ${INITRAMFS_CHROOT_X86}/root/.tests_profile
 # this is needed for ICCom TTY driver testing
-RUN apt-get install python3-serial
+RUN mkdir -p ${INITRAMFS_CHROOT_X86}/py_mods \
+      && pip install "Pyserial==3.4" --target "${INITRAMFS_CHROOT_X86}/py_mods"
+# for independent CRC computation check
+RUN mkdir -p ${INITRAMFS_CHROOT_X86}/py_mods \
+      && pip install "crc==7.1.0" --target "${INITRAMFS_CHROOT_X86}/py_mods"
 
 # add only for the container, not for an image
 WORKDIR ${repo_path}
@@ -107,59 +114,35 @@ FROM iccom AS iccom-test
 
 # x86
 
-# NOTE: IMPORTANT: COMPILATION ORDER MATTERS, the dependencies
-#       must be prepared before dependant!
-
 COPY test/sysfs.py /builds/python-test/
-RUN python-to-initramfs-x86 /builds/python-test/sysfs.py
-
 COPY test/general_test.py /builds/python-test/
-RUN python-to-initramfs-x86 /builds/python-test/general_test.py
-
 COPY test/iccom.py /builds/python-test/
-RUN python-to-initramfs-x86 /builds/python-test/iccom.py
-
 COPY test/iccom_skif.py /builds/python-test/
-RUN python-to-initramfs-x86 /builds/python-test/iccom_skif.py
-
 COPY test/iccom_testenv.py /builds/python-test/
-RUN python-to-initramfs-x86 /builds/python-test/iccom_testenv.py
-
 COPY test/iccom_test.py /builds/python-test/
-RUN python-to-initramfs-x86 /builds/python-test/iccom_test.py
-
 COPY test/iccom_skif_test.py /builds/python-test/
-RUN python-to-initramfs-x86 /builds/python-test/iccom_skif_test.py
-
 COPY test/iccom_tty_test.py /builds/python-test/
-RUN python-to-initramfs-x86 /builds/python-test/iccom_tty_test.py
-
-# NOTE: IMPORTANT: ORDER MATTERS, the dependencies must be prepared
-#       before dependant!
 COPY test/iccom_main.py /builds/python-test/
-RUN python-to-initramfs-x86 /builds/python-test/iccom_main.py
 
-# Cleanup excessive files to fit into RAM
-#ENV INITRAMFS_CHROOT_X86="/builds/initramfs_x86/content"
-RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/sysfs/lib-dynload"
-RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/general_test/lib-dynload"
-RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom/lib-dynload"
-RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom_skif/lib-dynload"
-RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom_testenv/lib-dynload"
-RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom_test/lib-dynload"
-RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom_skif_test/lib-dynload"
-# NOTE: the iccom_tty_test needs extra modules like, serial, so shall not
-#     be removed
-#RUN rm -rf "${INITRAMFS_CHROOT_X86}/usr/bin/iccom_tty_test/lib-dynload"
+RUN python-to-initramfs-x86 /builds/python-test/sysfs.py \
+      && python-to-initramfs-x86 /builds/python-test/general_test.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom_skif.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom_testenv.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom_test.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom_skif_test.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom_tty_test.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom_main.py
+
 
 RUN run-qemu-tests-x86
 
 # Check the expected results
 
 # ICCOM
-RUN grep "iccom_skif: PASS" /qemu_run_x86.log
-RUN grep "iccom: PASS" /qemu_run_x86.log
-RUN grep "iccom_tty: PASS" /qemu_run_x86.log
+RUN grep "iccom_skif: PASS" /qemu_run_x86.log \
+      && grep "iccom: PASS" /qemu_run_x86.log \
+      && grep "iccom_tty: PASS" /qemu_run_x86.log
 
 # ARM
 
@@ -183,6 +166,6 @@ RUN shell-to-initramfs-arm /builds/shell-tests/iccom_tty_test.sh
 RUN run-qemu-tests-arm /builds/linux_arm/device_tree/ast2500.dtb
 
 # Check the expected results
-RUN grep "iccom_test_0.shell.tests: PASS" /qemu_run_arm.log
-RUN grep "iccom_tty_test_tty_creation.shell.tests: PASS" /qemu_run_arm.log
-RUN grep "iccom_tty_test_basic_io.shell.tests: PASS" /qemu_run_arm.log
+RUN grep "iccom_test_0.shell.tests: PASS" /qemu_run_arm.log \
+      && grep "iccom_tty_test_tty_creation.shell.tests: PASS" /qemu_run_arm.log \
+      && grep "iccom_tty_test_basic_io.shell.tests: PASS" /qemu_run_arm.log

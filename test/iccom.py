@@ -1,4 +1,4 @@
-import zlib
+from crc import Calculator, Crc32
 from time import sleep
 
 from sysfs import *
@@ -339,7 +339,7 @@ def iccom_package(package_sequential_number, package_payload
 
     padded_package = package_header + package_payload + bytearray(padding_size * b"\xff")
 
-    crc32 = zlib.crc32(padded_package)
+    crc32 = Calculator(Crc32.CRC32).checksum(padded_package)
 
     full_package = padded_package + bytearray(crc32.to_bytes(CRC32_SIZE_BYTES, "little"))
 
