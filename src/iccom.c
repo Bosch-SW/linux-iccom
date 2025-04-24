@@ -1042,9 +1042,7 @@ struct iccom_dev_private {
 	struct iccom_error_rec errors[ICCOM_ERROR_TYPES_COUNT];
 
 	unsigned int sysfs_test_ch_rw_in_use;
-
 	struct list_head sysfs_test_ch_head;
-
 	struct mutex sysfs_test_ch_lock;
 
 	struct platform_device *pdev; 
@@ -5735,7 +5733,7 @@ void iccom_test_sysfs_ch_del(struct iccom_dev *iccom)
 	mutex_unlock(&iccom->p->sysfs_test_ch_lock);
 }
 
-// Extractd an iccom message from a specific sysfs channel
+// Extract an iccom message from a specific sysfs channel
 // and remove it from the list for userspace usage
 //
 // NOTE: The caller must lock and unlock the sysfs mutex
@@ -6466,7 +6464,7 @@ static ssize_t channels_ctl_store(
 			return ret;
 		}
 	}
-	else if(option == ICCOM_SYSFS_SET_CHANNEL) {
+	else if (option == ICCOM_SYSFS_SET_CHANNEL) {
 		iccom->p->sysfs_test_ch_rw_in_use = ch_id;
 	} else {
 		goto wrong_usage;
