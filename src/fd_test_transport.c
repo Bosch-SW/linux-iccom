@@ -182,7 +182,8 @@ int fd_tt_iterate_to_next_xfer_id(
 		struct fd_test_transport_dev *xfer_device);
 int fd_tt_accept_data(
 		struct fd_test_transport_dev* xfer_device,
-		struct __kernel full_duplex_xfer *xfer);
+		struct __kernel full_duplex_xfer *xfer
+		, bool enforce);
 static void fd_tt_trigger_data_exchange(
 		struct fd_test_transport_dev *xfer_device);
 
@@ -261,12 +262,17 @@ const struct full_duplex_sym_iface full_duplex_dev_iface = {
 //      is running or not
 // @finishing contains the status whether transport
 //      is finishing its work
+// @xfer_lock locked at the time of the xfer, and thus doesn't allow
+//		parallel data update and the xfer time.
+// @xfer_done set to true when current xfer was executed.
 struct fd_test_transport_dev {
 	struct full_duplex_xfer xfer;
 	bool got_us_data;
 	int next_xfer_id;
 	bool running;
 	bool finishing;
+	struct mutex xfer_lock;
+	bool xfer_done;
 };
 
 /*------------- FULL DUPLEX INTERFACE HELPER FUNCTIONS -------------*/
@@ -429,23 +435,36 @@ int fd_tt_iterate_to_next_xfer_id(
 //
 // @xfer_device {valid ptr} xfer device
 // @xfer {valid ptr} received xfer from iccom
+// @enforce if set, then done xfer can be updated,
+//		else it is treated as "in progress"	and will
+//		not be updated.
 //
 // RETURNS:
 //     >0: no errors
 //     <0: errors
 int fd_tt_accept_data(
 		struct fd_test_transport_dev* xfer_device,
-		struct __kernel full_duplex_xfer *xfer)
+		struct __kernel full_duplex_xfer *xfer
+		, bool enforce)
 {
+	mutex_lock(&xfer_device->xfer_lock);
+	// too late, xfer was executed already
+	if (!enforce && xfer_device->xfer_done) {
+		mutex_unlock(&xfer_device->xfer_lock);
+		return -EBADF;
+	}
 	// Copy xfer to dev xfer as is. In later
 	// stage override the data_rx_buf in fd_tt_update_wire_data
 	int res = fd_tt_deep_xfer_copy(xfer, &xfer_device->xfer);
 	if (res < 0) {
+		mutex_unlock(&xfer_device->xfer_lock);
 		return res;
 	}
 
 	xfer_device->xfer.id = fd_tt_iterate_to_next_xfer_id(xfer_device);
 
+	xfer_device->xfer_done = false;
+	mutex_unlock(&xfer_device->xfer_lock);
 	return xfer_device->xfer.id;
 }
 
@@ -462,6 +481,8 @@ static void fd_tt_trigger_data_exchange(
 		return;
 	}
 
+	mutex_lock(&xfer_device->xfer_lock);
+
 	bool start_immediately = false;
 	struct full_duplex_xfer *next_xfer
 			= xfer_device->xfer.done_callback(
@@ -469,16 +490,19 @@ static void fd_tt_trigger_data_exchange(
 				xfer_device->next_xfer_id,
 				&start_immediately,
 				xfer_device->xfer.consumer_data);
+	xfer_device->xfer_done = true;
 
 	// NOTE: For a new xfer to happen userspace must
 	//       provide new data, so dropping the flag
 	xfer_device->got_us_data = false;
 
+	mutex_unlock(&xfer_device->xfer_lock);
+
 	if (IS_ERR_OR_NULL(next_xfer)) {
 		return;
 	}
 
-	fd_tt_accept_data(xfer_device, next_xfer);
+	fd_tt_accept_data(xfer_device, next_xfer, true);
 }
 
 /* ------------- FULL DUPLEX INTERFACE API ------------- */
@@ -552,7 +576,7 @@ int fd_tt_default_data_update(
 	FD_TT_CHECK_XFER_DEVICE("", return -EFAULT);
 	FD_TT_FULL_DUPLEX_DEVICE_TO_XFER_DEVICE();
 	FD_TT_XFER_DEVICE_ON_FINISH(return -EHOSTDOWN);
-	return fd_tt_accept_data(xfer_device, xfer);
+	return fd_tt_accept_data(xfer_device, xfer, false);
 }
 
 // API
@@ -619,7 +643,9 @@ int fd_tt_init(
 	xfer_device->finishing = false;
 	xfer_device->running = true;
 	xfer_device->got_us_data = false;
-	return fd_tt_accept_data(xfer_device, default_xfer);
+	xfer_device->xfer_done = false;
+	mutex_init(&xfer_device->xfer_lock);
+	return fd_tt_accept_data(xfer_device, default_xfer, true);
 }
 
 // API
@@ -652,6 +678,7 @@ int fd_tt_close(void __kernel *device)
 	xfer_device->finishing = true;
 	xfer_device->running = false;
 	fd_tt_xfer_free(&xfer_device->xfer);
+	mutex_destroy(&xfer_device->xfer_lock);
 
 	return 0;
 }
