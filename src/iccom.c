@@ -471,6 +471,8 @@ struct iccom_test_sysfs_channel;
 
 /* ------------------------ FORWARD DECLARATIONS ------------------------*/
 
+static bool __iccom_have_multiple_packages(struct iccom_dev *iccom);
+
 struct full_duplex_xfer *__iccom_xfer_failed_callback(
 		const struct full_duplex_xfer __kernel *failed_xfer
 		, const int next_xfer_id
@@ -685,6 +687,10 @@ struct iccom_message {
 //      This is done for backward compatibility with the previous
 //      implementation.
 //
+// @previous_padding_size if != 0, then this is recycled package
+//		which previously had previous_padding_size bytes of padding,
+//		thus upon package finalization we need only to pad the
+//		area, which was not padded before.
 struct iccom_package {
 	struct list_head list_anchor;
 
@@ -692,6 +698,7 @@ struct iccom_package {
 	size_t size;
 
 	bool owns_data;
+	size_t previous_padding_size;
 };
 
 // Packet header descriptor.
@@ -916,7 +923,17 @@ struct iccom_error_rec {
 //
 //      TX queue manipulation routines:
 //          __iccom_queue_*
-//
+// @tx_free_packages_pool_head the pool of the allocated packages available
+//		for reuse. Profit from reuse of the packages is that one
+//		doesn't need to re-pad the empty area of the old package
+//		upon finalizing the package. Also no memory allocation is
+//		needed in this case. So only minimal work is done to get
+//		the package and fill it with data.
+//		NOTE: locked together with tx_data_packages_head by tx_queue_lock.
+// @free_packages_pool_curr_size current size of the tx_free_packages_pool_head 
+//		list (in packages).
+// @free_packages_pool_max_size maximal size of the tx_free_packages_pool_head 
+//		list (in packages).
 // @tx_queue_lock mutex to protect the TX packages queue from data
 //      races.
 // @ack_val const by usage. Keeps the ACK value, which is to be sent to
@@ -985,6 +1002,9 @@ struct iccom_dev_private {
 	struct iccom_dev *iccom;
 
 	struct list_head tx_data_packages_head;
+	struct list_head tx_free_packages_pool_head;
+	size_t free_packages_pool_curr_size;
+	size_t free_packages_pool_max_size;
 	struct mutex tx_queue_lock;
 
 	unsigned char ack_val;
@@ -1640,25 +1660,20 @@ static inline void * __iccom_package_get_free_space_start_addr(
 
 // Helper. Fills package unused payload area with symbol.
 // See @iccom_package description.
-//
-// RETURNS:
-//      number of filled bytes
-static unsigned int __iccom_package_fill_unused_payload(
-		struct iccom_package *package, uint8_t symbol)
+static void __iccom_package_fill_unused_payload(
+		struct iccom_package *package, const uint8_t symbol)
 {
 	// See @iccom_package description.
 
 	size_t free_length = __iccom_package_get_payload_free_space(
 						      package, NULL);
 
-	if (free_length == 0) {
-		return free_length;
+	if (free_length > package->previous_padding_size) {
+		memset(__iccom_package_get_free_space_start_addr(package, NULL)
+			, symbol, free_length - package->previous_padding_size);
 	}
 
-	memset(__iccom_package_get_free_space_start_addr(package, NULL)
-	       , symbol, free_length);
-
-	return free_length;
+	package->previous_padding_size = free_length;
 }
 
 // Helper. Verifies that all free payload bytes set to given symbol.
@@ -1766,7 +1781,7 @@ static unsigned int __iccom_package_compute_src(
 	}
 
 	if (payload_size > __iccom_package_payload_room_size(package)) {
-		// if we here, it is logical error
+		// if we're here, it is logical error
 		return 0;
 	}
 
@@ -1789,6 +1804,7 @@ static unsigned int __iccom_package_compute_src(
 static int __iccom_package_init(struct iccom_package *package
 		, size_t package_size_bytes)
 {
+	package->previous_padding_size = 0;
 	package->size = package_size_bytes;
 	package->owns_data = true;
 	package->data = (uint8_t*)kmalloc(package->size, GFP_KERNEL);
@@ -3933,8 +3949,28 @@ static int __iccom_enqueue_new_tx_data_package(struct iccom_dev *iccom)
 	ICCOM_CHECK_DEVICE("", return -ENODEV);
 	ICCOM_CHECK_DEVICE_PRIVATE("", return -EINVAL);
 #endif
-	if (__iccom_have_packages(iccom)) {
+	// need to finalize all but first one, which is always finalized
+	// by design
+	if (__iccom_have_multiple_packages(iccom)) {
 		__iccom_package_finalize(__iccom_get_last_tx_package(iccom));
+	}
+
+	// Shortcut for ecological packages recycling =)
+	if (!list_empty(&iccom->p->tx_free_packages_pool_head)) {
+		struct list_head *pkg_a= iccom->p->tx_free_packages_pool_head.next;
+		list_del(pkg_a);
+		iccom->p->free_packages_pool_curr_size--;
+
+		// NOTE: if it is in the pool, it is well-defined package
+		struct iccom_package *pkg = __iccom_get_package_from_list_anchor(pkg_a);
+
+		__iccom_package_set_payload_size(pkg, 0);
+		__iccom_package_set_id(pkg, __iccom_get_next_package_id(iccom));
+
+		list_add_tail(pkg_a, &iccom->p->tx_data_packages_head);
+		iccom->p->statistics.packages_in_tx_queue++;
+
+		return 0;
 	}
 
 	struct iccom_package *new_package;
@@ -3957,7 +3993,6 @@ static int __iccom_enqueue_new_tx_data_package(struct iccom_dev *iccom)
 
 	list_add_tail(&new_package->list_anchor
 		      , &iccom->p->tx_data_packages_head);
-
 	iccom->p->statistics.packages_in_tx_queue++;
 
 	return 0;
@@ -4141,21 +4176,34 @@ static bool __iccom_queue_step_forward(struct iccom_dev *iccom)
 	// consumer, so need mutex here for protection
 	mutex_lock(&iccom->p->tx_queue_lock);
 
+	struct iccom_package *delivered_package
+			     = __iccom_get_first_tx_package(iccom);
+
 	// if we have more than one package in the queue, this
 	// means we have some our data to send in further packages
 	if (__iccom_have_multiple_packages(iccom)) {
-		struct iccom_package *delivered_package
-			     = __iccom_get_first_tx_package(iccom);
-		__iccom_package_free(delivered_package);
 		iccom->p->statistics.packages_in_tx_queue--;
 		have_data = true;
+
+		// move to recycling, when can
+		if (iccom->p->free_packages_pool_curr_size
+				< iccom->p->free_packages_pool_max_size) {
+			list_del(&delivered_package->list_anchor);
+			list_add_tail(&delivered_package->list_anchor
+							, &iccom->p->tx_free_packages_pool_head);
+			iccom->p->free_packages_pool_curr_size++;
+		} else {
+			__iccom_package_free(delivered_package);
+		}
+
+		if (!__iccom_have_multiple_packages(iccom)) {
+			__iccom_package_finalize(__iccom_get_last_tx_package(iccom));
+		}
+
 		goto finalize;
 	}
 
 	// we have only one package in queue
-	struct iccom_package *delivered_package
-		= __iccom_get_first_tx_package(iccom);
-
 	// set this package empty and update with new id
 	__iccom_package_set_id(delivered_package, __iccom_get_next_package_id(iccom));
 	__iccom_package_make_empty(delivered_package);
@@ -4164,32 +4212,6 @@ static bool __iccom_queue_step_forward(struct iccom_dev *iccom)
 finalize:
 	mutex_unlock(&iccom->p->tx_queue_lock);
 	return have_data;
-}
-
-// Frees whole TX queue (should be called only on ICCom
-// destruction when all external calls which might modify the
-// TX queue are already disabled).
-static void __iccom_queue_free(struct iccom_dev *iccom)
-{
-#ifdef ICCOM_DEBUG
-	if (!__iccom_have_packages(iccom)) {
-	    iccom_err("empty TX packages");
-	}
-#endif
-	mutex_lock(&iccom->p->tx_queue_lock);
-
-	struct iccom_package *first_package
-		    = __iccom_get_first_tx_package(iccom);
-
-	while (first_package) {
-	    __iccom_package_free(first_package);
-	    first_package = __iccom_get_first_tx_package(iccom);
-	}
-
-	// freeing the TX queue access
-	mutex_unlock(&iccom->p->tx_queue_lock);
-
-	mutex_destroy(&iccom->p->tx_queue_lock);
 }
 
 // Helper. Enqueues given message into the queue. Adds as many
@@ -4272,11 +4294,6 @@ static int __iccom_queue_append_message(struct iccom_dev *iccom
 			goto finalize;
 		}
 	}
-
-	// we will always finalize package to make it always be ready
-	// for sending, however this doesn't mean that we can not add
-	// more data to the finalized but not full package later
-	__iccom_package_finalize(dst_package);
 
 finalize:
 	mutex_unlock(&iccom->p->tx_queue_lock);
@@ -4737,7 +4754,8 @@ static bool __iccom_verify_transport_layer_interface(
 		    && !IS_ERR_OR_NULL(iface->close);
 }
 
-// Helper. Initializes the iccom packages storage (TX storage).
+// Helper. Initializes the iccom packages storage (TX storage) and
+// the TX packages recycling pool.
 // RETURNS:
 //      0: all fine
 //      <0: negative error code
@@ -4748,12 +4766,17 @@ static inline int __iccom_init_packages_storage(struct iccom_dev *iccom)
 	ICCOM_CHECK_DEVICE_PRIVATE("", return -EINVAL);
 #endif
 	INIT_LIST_HEAD(&iccom->p->tx_data_packages_head);
+	INIT_LIST_HEAD(&iccom->p->tx_free_packages_pool_head);
+	iccom->p->free_packages_pool_curr_size = 0;
+	iccom->p->free_packages_pool_max_size = ICCOM_DEFAULT_FREE_TX_PACKAGES_POOL_MAX_SIZE;
 	mutex_init(&iccom->p->tx_queue_lock);
 	iccom->p->next_tx_package_id = ICCOM_INITIAL_PACKAGE_ID;
 	return 0;
 }
 
-// Helper. Frees all resources owned by packages storage.
+// Helper. Frees all resources owned by TX packages storage and also
+// the TX packages recycling pool.
+// NOTE: to be called only upon ICCom destruction.
 static inline void __iccom_free_packages_storage(struct iccom_dev *iccom)
 {
 #ifdef ICCOM_DEBUG
@@ -4763,6 +4786,11 @@ static inline void __iccom_free_packages_storage(struct iccom_dev *iccom)
 	mutex_lock(&iccom->p->tx_queue_lock);
 	while (__iccom_have_packages(iccom)) {
 		__iccom_package_free(__iccom_get_first_tx_package(iccom));
+	}
+	while (!list_empty(&iccom->p->tx_free_packages_pool_head)) {
+		struct list_head *pkg_a= iccom->p->tx_free_packages_pool_head.next;
+		__iccom_package_free(__iccom_get_package_from_list_anchor(pkg_a));
+		iccom->p->free_packages_pool_curr_size--;
 	}
 	mutex_unlock(&iccom->p->tx_queue_lock);
 	mutex_destroy(&iccom->p->tx_queue_lock);
@@ -5258,7 +5286,7 @@ void iccom_delete(struct iccom_dev *iccom, struct platform_device *pdev)
 
 	// Cleanup all our allocated data
 	iccom_msg_storage_free(&iccom->p->rx_messages);
-	__iccom_queue_free(iccom);
+	__iccom_free_packages_storage(iccom);
 
 	iccom_test_sysfs_ch_del(iccom);
 	mutex_destroy(&iccom->p->sysfs_test_ch_lock);

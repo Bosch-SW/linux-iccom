@@ -52,6 +52,18 @@
         #define ICCOM_DEFAULT_DATA_XFER_SIZE_BYTES 64
 #endif
 
+// The maximal number of packages to be stored in the
+// free package pool to avoid recreation of the packages.
+// This is better to be set to the size of the typical
+// brust TX queue size (in packages). This option is valuable
+// for the mostly-sending side of the communication.
+// NOTE: setting this value to 0 will still keep the
+//     only "just-finished" package buffered for the
+//     next xfer.
+#ifndef ICCOM_DEFAULT_FREE_TX_PACKAGES_POOL_MAX_SIZE
+        #define ICCOM_DEFAULT_FREE_TX_PACKAGES_POOL_MAX_SIZE 4
+#endif
+
 // size of data acknoledgement xfer in bytes
 #define ICCOM_ACK_XFER_SIZE_BYTES 1
 
