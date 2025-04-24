@@ -996,13 +996,13 @@ struct iccom_config {
 //      statistics to user space.
 // @sysfs_test_ch_rw_in_use {unsigned int} sysfs channel that is
 //      selected for read/write operation requested by the userspace
-//      via sysfs file channels_RW. Those operations will use this variable
+//      via sysfs file channels_io. Those operations will use this variable
 //      to distinguish which sysfs channel operation shall take place.
 //      Userpace shall set the sysfs test channel before the read/write
 //      via sysfs file channels_ctl.
 // @sysfs_test_ch_head the list which shall hold the sysfs channels
 //      sniffed per sysfs channel. Userspace can then fetch those
-//      via the sysfs file channels_RW
+//      via the sysfs file channels_io
 // @sysfs_test_ch_lock mutex to protect the sysfs channels from from data
 //      races.
 // @pdev The platform device we register on creation.
@@ -6344,9 +6344,9 @@ static ssize_t data_package_size_show(
 }
 static DEVICE_ATTR_RO(data_package_size);
 
-// The sysfs channels_RW_show function get's triggered
+// The sysfs channels_io_show function get's triggered
 // whenever from userspace one wants to read the sysfs
-// file channels_RW.
+// file channels_io.
 // It shall return the next iccom_message data stored in the
 // specific sysfs channel msgs list for the particular iccom device.
 //
@@ -6358,7 +6358,7 @@ static DEVICE_ATTR_RO(data_package_size);
 //      >0: iccom_message data
 //       0: not mapped
 //      <0: negated error code
-static ssize_t channels_RW_show(
+static ssize_t channels_io_show(
 		struct device *dev, struct device_attribute *attr, char *buf)
 {
 	ICCOM_CHECK_PTR(buf, return -EINVAL);
@@ -6374,9 +6374,9 @@ static ssize_t channels_RW_show(
 							buf, PAGE_SIZE);
 }
 
-// The sysfs channels_RW_store function get's triggered
+// The sysfs channels_io_store function get's triggered
 // whenever from userspace one wants to write the sysfs
-// file channels_RW.
+// file channels_io.
 // Allows to provide data from userspace to post a new
 // iccom_message via iccom_post_message.
 //
@@ -6389,7 +6389,7 @@ static ssize_t channels_RW_show(
 // RETURNS:
 //    >=0: sucessfully executed the command
 //     <0: negated error code
-static ssize_t channels_RW_store(
+static ssize_t channels_io_store(
 		struct device *dev, struct device_attribute *attr,
 		const char *buf, size_t count)
 {
@@ -6418,13 +6418,13 @@ static ssize_t channels_RW_store(
 	return count;
 }
 
-static DEVICE_ATTR_RW(channels_RW);
+static DEVICE_ATTR_RW(channels_io);
 
 // The sysfs channels_ctl_store function get's triggered
 // whenever from userspace one wants to write the sysfs
 // file channels_ctl.
 // Allows to create and destroy sysfs channels as well as
-// to set the operating sysfs channel for channels_RW read
+// to set the operating sysfs channel for channels_io read
 // and write operations.
 //
 // @dev {valid ptr} iccom device
@@ -6564,7 +6564,7 @@ static struct attribute *iccom_dev_attrs[] = {
 	&dev_attr_statistics.attr,
 	&dev_attr_channels.attr,
 	&dev_attr_channels_ctl.attr,
-	&dev_attr_channels_RW.attr,
+	&dev_attr_channels_io.attr,
 	&dev_attr_data_package_size.attr,
 	&dev_attr_replace_empty_tx_package.attr,
 	NULL,

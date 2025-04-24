@@ -543,7 +543,7 @@ Send data to ICCom
 # Select sysfs channel 1
 # sudo sh -c "echo s1 > /sys/devices/platform/iccom.0/channels_ctl"
 # Send the data to iccom.0 for selected sysfs channel
-sudo sh -c "echo Hello from userspace side! > /sys/devices/platform/iccom.0/channels_RW"
+sudo sh -c "echo Hello from userspace side! > /sys/devices/platform/iccom.0/channels_io"
 ```
 
 Read data to ICCom
@@ -551,7 +551,7 @@ Read data to ICCom
 # Select sysfs channel 1
 # sudo sh -c "echo s1 > /sys/devices/platform/iccom.0/channels_ctl"
 # Read data from iccom.0 for selected sysfs channel
-cat /sys/devices/platform/iccom.0/channels_RW"
+cat /sys/devices/platform/iccom.0/channels_io"
 ```
 
 Create/delete RW file for Full Duplex Test Transport

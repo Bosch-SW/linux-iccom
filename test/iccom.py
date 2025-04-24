@@ -145,7 +145,7 @@ def iccom_sysfs_send(iccom_dev, channel, message, err_expectation):
     # Set sysfs channel to work with
     set_iccom_sysfs_channel(iccom_dev, channel, None)
     # Write to the working sysfs channel
-    file = "/sys/devices/platform/%s/channels_RW" % (iccom_dev)
+    file = "/sys/devices/platform/%s/channels_io" % (iccom_dev)
     print("iccom_sysfs_send: " + str(channel))
     command = message
     write_sysfs_file(file, command, err_expectation)
@@ -164,7 +164,7 @@ def iccom_sysfs_read(iccom_dev, channel, err_expectation):
     # Set sysfs channel to work with
     set_iccom_sysfs_channel(iccom_dev, channel, None)
     # Read from the working sysfs channel
-    file = "/sys/devices/platform/%s/channels_RW" % (iccom_dev)
+    file = "/sys/devices/platform/%s/channels_io" % (iccom_dev)
     print("iccom_sysfs_read: " + str(channel))
     output = read_sysfs_file(file, err_expectation)
     return output

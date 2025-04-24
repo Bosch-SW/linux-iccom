@@ -39,7 +39,7 @@ iccom_send() {
     local channel=$2
     local message=$3
     set_iccom_sysfs_channel ${iccom_dev} ${channel}
-    sh -c "echo -n ${message} > /sys/devices/platform/${iccom_dev}/channels_RW"
+    sh -c "echo -n ${message} > /sys/devices/platform/${iccom_dev}/channels_io"
 }
 
 # Does the wire full duplex xfer and checks if the
