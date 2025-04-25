@@ -1,5 +1,5 @@
 from crc import Calculator, Crc32
-from time import sleep
+from time import time
 
 from sysfs import *
 
@@ -146,7 +146,6 @@ def iccom_sysfs_send(iccom_dev, channel, message, err_expectation):
     set_iccom_sysfs_channel(iccom_dev, channel, None)
     # Write to the working sysfs channel
     file = "/sys/devices/platform/%s/channels_io" % (iccom_dev)
-    print("iccom_sysfs_send: " + str(channel))
     command = message
     write_sysfs_file(file, command, err_expectation)
 
@@ -157,16 +156,25 @@ def iccom_sysfs_send(iccom_dev, channel, message, err_expectation):
 # @channel {string} sysfs channel number
 # @err_expectation {number} the errno which is expected
 #                           to be caught. Example: None, errno.EIO, ...
+# @timeout_ms {>=0} the timeout to wait for the data to come in ms.
+#
 # Returns:
 # Empty String
 # String with data read
-def iccom_sysfs_read(iccom_dev, channel, err_expectation):
+def iccom_sysfs_read(iccom_dev, channel, err_expectation, timeout_ms=1000):
     # Set sysfs channel to work with
     set_iccom_sysfs_channel(iccom_dev, channel, None)
     # Read from the working sysfs channel
     file = "/sys/devices/platform/%s/channels_io" % (iccom_dev)
-    print("iccom_sysfs_read: " + str(channel))
-    output = read_sysfs_file(file, err_expectation)
+
+    start = time()
+    while True:
+        output = read_sysfs_file(file, err_expectation)
+        if len(output) > 0:
+            break
+        if ((time() - start) * 1000 > timeout_ms):
+            break
+
     return output
 
 # Write in the full duplext test transport device the wire
@@ -195,11 +203,21 @@ def write_to_wire(transport_dev, data, err_expectation, com_log=None):
 #                           to be caught. Example: None, errno.EIO, ...
 # @com_log {None or the dict with entry "log"} here the log of the
 #   op shall be written if provided
+# @timeout_ms {>=0} time to wait for non-empty result on wire.
 #
 # RETURNS: the bytarray of wire data sent by ICCom to the wire
-def read_from_wire(transport_dev, err_expectation, com_log=None):
+def read_from_wire(transport_dev, err_expectation, com_log=None
+                   , timeout_ms=1000):
     file = "/sys/devices/platform/%s/transport_RW" % (transport_dev)
-    output = read_sysfs_file(file, err_expectation)
+
+    start = time()
+    while True:
+        output = read_sysfs_file(file, err_expectation)
+        if len(output) != 0:
+            break
+        if ((time() - start) * 1000 > timeout_ms):
+            break
+
     result = bytearray.fromhex(output)
     if com_log is not None:
         if "log" not in com_log:
@@ -222,7 +240,6 @@ def read_from_wire(transport_dev, err_expectation, com_log=None):
 def wire_xfer(transport_dev, send_data, error_R_expectation, error_W_expectation
               , com_log=None):
     write_to_wire(transport_dev, send_data, error_W_expectation, com_log)
-    sleep(0.1)
     return read_from_wire(transport_dev, error_R_expectation, com_log)
 
 # Does the wire full duplex xfer and checks if the
@@ -311,13 +328,9 @@ def check_wire_xfer_ack(transport_dev, error_R_expectation
 #
 # Throws an exception if the read data doesn't match expected
 def check_ch_data(iccom_device, channel, expected_ch_data, expected_error):
-    # time is a bad companion, but still we need some time to allow the
-    # kernel internals to work all out with 100% guarantee, to allow
-    # test stability
-    sleep(0.3)
     output = iccom_sysfs_read(iccom_device, channel, expected_error)
 
-    if(expected_error == None):
+    if (expected_error == None):
         if (output != expected_ch_data):
             raise RuntimeError("Unexpected data mismatch in channel!\n"
                                "    %s (expected)\n"
