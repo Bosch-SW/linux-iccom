@@ -5766,9 +5766,7 @@ ssize_t iccom_test_sysfs_ch_pop_msg(
 		return length;
 	}
 
-	iccom_err("Sysfs channel %d does not have msgs"
-			" to be popped.", ch_entry->ch_id);
-	return -EIO;
+	return -ENODATA;
 }
 
 // Routine to retrieve a sysfs channel iccom message

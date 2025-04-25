@@ -238,7 +238,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_without_transport_data(
                                 , None, None, "second ack frame")
 
             # Check that there is no channel data
-            check_ch_data(te.iccom_name(), 1, "", errno.EIO)
+            check_ch_data(te.iccom_name(), 1, "", errno.ENODATA)
 
 def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_payload_size(
                 params, get_test_info=False):
@@ -288,7 +288,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_data_wrong_p
                             , None , None, "expected nack on wire frame")
 
             # Check that there is no channel data
-            check_ch_data(te.iccom_name(), 1, "", errno.EIO)
+            check_ch_data(te.iccom_name(), 1, "", errno.ENODATA)
 
 def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
                 params, get_test_info=False):
@@ -347,7 +347,7 @@ def iccom_data_exchange_to_transport_with_iccom_data_with_transport_nack(
             check_wire_xfer_ack(te.test_transport_name(), None, None, "final ack")
 
             # Check that there is no channel data
-            check_ch_data(te.iccom_name(), 1000, "", errno.EIO)
+            check_ch_data(te.iccom_name(), 1000, "", errno.ENODATA)
 
 def iccom_check_devices_deletion(
                 params, get_test_info=False):
