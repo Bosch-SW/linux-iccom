@@ -572,8 +572,8 @@ def iccom_initial_package(params, get_test_info=False):
 
 class IccomTester(GeneralTest):
 
-    def __init__(self, skip_list=None):
-        super(IccomTester, self).__init__("iccom", skip_list)
+    def __init__(self, skip_list=None, run_list=None):
+        super(IccomTester, self).__init__("iccom", skip_list, run_list)
 
     def run_tests(self):
 
