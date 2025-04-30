@@ -190,7 +190,11 @@ static void ictty_tty_hangup(struct tty_struct *tty);
 void ictty_tty_port_destruct(struct tty_port *port);
 
 static int ictty_probe(struct platform_device *pdev);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 static int ictty_remove(struct platform_device *pdev);
+#else
+static void ictty_remove(struct platform_device *pdev);
+#endif
 
 /*----------------------- TTY DEVICE API -----------------------------*/
 
@@ -955,15 +959,21 @@ free_ictty_and_port:
 }
 
 // Handles removal of the ICCom TTY platform device.
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
+#define ICTTY_REMOVE_ERR_RET (-ENODEV)
 static int ictty_remove(struct platform_device *pdev)
+#else
+#define ICTTY_REMOVE_ERR_RET
+static void ictty_remove(struct platform_device *pdev)
+#endif
 {
 	if (IS_ERR_OR_NULL(pdev)) {
 		pr_err("ictty_remove: no platform device provided\n");
-		return -ENODEV;
+		return ICTTY_REMOVE_ERR_RET;
 	}
 
 	struct iccom_tty_dev *ictty = dev_get_drvdata(&pdev->dev);
-	ICTTY_CHECK_DEVICE(return -ENODEV);
+	ICTTY_CHECK_DEVICE(return ICTTY_REMOVE_ERR_RET);
 
 	ictty_info("removing iccom tty device on ch. %d", ictty->iccom_ch);
 
@@ -992,7 +1002,11 @@ static int ictty_remove(struct platform_device *pdev)
 	kfree(ictty);
 	ictty = NULL;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 	return 0;
+#else
+	return;
+#endif
 }
 
 /* --------------------- MODULE HOUSEKEEPING SECTION ------------------- */

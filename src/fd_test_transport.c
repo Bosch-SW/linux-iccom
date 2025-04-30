@@ -231,7 +231,12 @@ static ssize_t delete_transport_store(
 		, const char *buf, size_t count);
 
 static int fd_tt_probe(struct platform_device *pdev);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 static int fd_tt_remove(struct platform_device *pdev);
+#else
+static void fd_tt_remove(struct platform_device *pdev);
+#endif
+
 
 static int __init fd_tt_module_init(void);
 static void __exit fd_tt_module_exit(void);
@@ -1285,13 +1290,19 @@ static int fd_tt_probe(struct platform_device *pdev)
 // RETURNS:
 //      0: Sucessfully removed the device
 //     <0: negated error code
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
+#define FD_TT_REMOVE_RET (-ENODEV)
 static int fd_tt_remove(struct platform_device *pdev)
+#else
+#define FD_TT_REMOVE_RET
+static void fd_tt_remove(struct platform_device *pdev)
+#endif
 {
 	FD_TT_GET_FULL_DUPLEX_DEVICE(&pdev->dev)
 	FD_TT_CHECK_FULL_DUPLEX_DEVICE("full duplex device is null"
 					" when trying to remove the"
 					" platform device."
-					, return -ENODEV);
+					, return FD_TT_REMOVE_RET);
 
 	if (!IS_ERR_OR_NULL(full_duplex_dev->iface)) {
 		full_duplex_dev->iface = NULL;
@@ -1310,8 +1321,11 @@ static int fd_tt_remove(struct platform_device *pdev)
 	fd_tt_info(FD_TT_LOG_INFO_DBG_LEVEL,
 			"Successfully removed the Full Duplex"
 			" Test Transport device with id: %d", pdev->id);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 	return 0;
+#endif
 }
+#undef FD_TT_REMOVE_RET
 
 // The full duplex test transport driver
 // compatible definition for matching the

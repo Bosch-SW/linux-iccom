@@ -499,6 +499,17 @@ void iccom_dbg_printout_xfer(const struct full_duplex_xfer *const xfer);
 void iccom_dbg_printout_message(const struct iccom_message *const msg);
 #endif
 
+static inline uint32_t __iccom_compute_iso_hdlc_crc32(
+		uint8_t *data, size_t size_bytes);
+uint32_t __iccom_reflect_int32(uint32_t val);
+static inline uint32_t __iccom_gf_divide_int64_fast_key4(
+		const uint32_t hi, const uint32_t lo);
+static inline void __iccom_gf_multiply_int32(
+		uint32_t a, uint32_t b
+		, uint32_t *hi_out, uint32_t *lo_out);
+uint32_t __iccom_compute_crc32_iso_hdlc_padding_optimized(
+	uint8_t *data, const size_t size_bytes
+	, size_t padding_size);
 struct iccom_message_storage_channel *__iccom_msg_storage_find_channel(
 		struct iccom_message_storage *storage
 		, unsigned int channel);
@@ -6700,15 +6711,21 @@ free_iccom:
 // RETURNS:
 //      0: Sucessfully removed the device
 //     <0: negated error code
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
+#define ICCOM_REMOVE_RET (-ENODEV)
 static int iccom_remove(struct platform_device *pdev)
+#else
+#define ICCOM_REMOVE_RET
+static void iccom_remove(struct platform_device *pdev)
+#endif
 {
-	ICCOM_CHECK_PTR(pdev, return -ENODEV);
+	ICCOM_CHECK_PTR(pdev, return ICCOM_REMOVE_RET);
 
 	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
 			"Removing ICCom dev: %s", dev_name(&pdev->dev));
 
 	struct iccom_dev *iccom = (struct iccom_dev *)dev_get_drvdata(&pdev->dev);
-	ICCOM_CHECK_DEVICE("no device provided", return -ENODEV);
+	ICCOM_CHECK_DEVICE("no device provided", return ICCOM_REMOVE_RET);
 
 	iccom_info_raw(ICCOM_LOG_INFO_KEY_LEVEL, "Closing ICCom device");
 	iccom_delete(iccom, pdev);
@@ -6719,8 +6736,11 @@ static int iccom_remove(struct platform_device *pdev)
 	iccom_info(ICCOM_LOG_INFO_KEY_LEVEL,
 			"Removed ICCom dev: %s", dev_name(&pdev->dev));
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 	return 0;
+#endif
 };
+#undef ICCOM_REMOVE_RET
 
 // The ICCom driver compatible definition for
 // matching the driver to devices available

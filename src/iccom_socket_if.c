@@ -343,6 +343,8 @@ static int __iccom_skif_match_channel2lbackrule(
 		, const int channel);
 static int __iccom_skif_lback_rule_verify(
 		const struct iccom_skif_loopback_mapping_rule *const rule);
+int __iccom_skif_routing_action_cmp(
+	const void *a, const void *b, const void *priv);
 inline struct iccom_skif_routing_rule *__iccom_skif_match_rule(
 		struct hlist_head *rules_hash
 		, int hash_size_bits, int in_channel, bool in_dir);
@@ -438,7 +440,11 @@ static int iccom_skif_device_tree_node_setup(
 		struct platform_device *pdev
 		, struct iccom_sockets_device *iccom_sk);
 static int iccom_skif_probe(struct platform_device *pdev);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 static int iccom_skif_remove(struct platform_device *pdev);
+#else
+static void iccom_skif_remove(struct platform_device *pdev);
+#endif
 static void __iccom_skif_netlink_data_ready(struct sk_buff *skb);
 static int __init iccom_skif_module_init(void);
 static void __exit iccom_skif_module_exit(void);
@@ -1082,7 +1088,9 @@ static int __iccom_skif_reg_socket_family(
 			.groups = 0
 			, .flags = 0
 			, .input = &__iccom_skif_netlink_data_ready
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 			, .cb_mutex = NULL
+#endif
 			, .bind = NULL
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6,4,0)
 			, .compare = NULL
@@ -2812,7 +2820,11 @@ free_iccom_skif_data:
 // RETURNS:
 //      0: Successfully removed the device
 //     <0: negated error code
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 static int iccom_skif_remove(struct platform_device *pdev)
+#else
+static void iccom_skif_remove(struct platform_device *pdev)
+#endif
 {
 	if (IS_ERR_OR_NULL(pdev)) {
 		goto invalid_params;
@@ -2833,11 +2845,19 @@ static int iccom_skif_remove(struct platform_device *pdev)
 	kfree(iccom_sk);
 	iccom_sk = NULL;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 	return 0;
+#else
+	return;
+#endif
 
 invalid_params:
 	iccom_skif_warning("Removing a Iccom Device failed - NULL pointer!");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6,11,0)
 	return -EINVAL;
+#else
+	return;
+#endif
 }
 
 // The ICCom socket driver compatible definition for
