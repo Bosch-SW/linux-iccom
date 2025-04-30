@@ -72,6 +72,21 @@ uninstall:
 # This will build the reusable Docker Stage for
 # other components to build the external kernel modules
 docker-image:
+	@echo
+	@echo '                    Building for kernel: ${KVER}'
+	@echo
+	@echo '  ************************************************************************'
+	@echo '  |                             NOTE:                                    |'
+	@echo '  |                                                                      |'
+	@echo '  |  The docker image build will be based on the                         |'
+	@echo '  |      * docker.io/bosch-linux-full-duplex-interface:config_kver-vA-B  |'
+	@echo '  |  docker image (NOTE: A and B are kernel major and minor version      |'
+	@echo '  |  numbers), to get it you need to clone                               |'
+	@echo '  |      * bosch-linux-full-duplex-interface  repository                 |'
+	@echo '  |  and then run "make KVER=vA.B test" in the root of the repo.         |'
+	@echo '  |                                                                      |'
+	@echo '  ************************************************************************'
+	@echo
 	$(call docker_build, ${TARGET_STAGE},${TARGET_STAGE},${DOCKER_OUT_TAG})
 
 # test if the image is really working
