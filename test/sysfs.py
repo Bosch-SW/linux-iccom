@@ -46,24 +46,26 @@ def read_sysfs_file(file, err_expectation):
 # Throws an exception if the received error doesn't match expected
 def write_sysfs_file(file, content_to_write, err_expectation):
     try:
-        with open(file, 'w') as file:
-            file.write(content_to_write)
+        with open(file, 'w') as file_obj:
+            file_obj.write(content_to_write)
     except OSError as e:
         if err_expectation == None:
             raise RuntimeError(
                     ("Sysfs write file unexpected error \n"
                     "    (file) %s \n"
+                    "    (content in quotes) \"%s\" \n"
                     "    (error) %s "
                     + ("(ENOENT: no such file or dir)" if e.errno == 2 else "")
                     + "\n")
-                    % (file, e.errno))
+                    % (file, content_to_write, e.errno))
         else:
             if (e.errno != err_expectation):
                 raise RuntimeError("Sysfs write file expectation mismatch\n"
                      "    (file) %s \n"
+                     "    (content in quotes) \"%s\" \n"
                      "    (actual) %s \n"
                      "    (expectation) %s \n"
-                     % (file, e.errno, err_expectation))
+                     % (file, content_to_write, e.errno, err_expectation))
 
 # Checks whether a sysfs file exists or not and handle expectations
 # within the function by raising errors when errors
