@@ -108,10 +108,13 @@ class IccomTestEnv:
 
         # Tests helper.
         # Unbinds and removes default devices set.
-        def iccom_destroy_default_stack(self):
-                self.print_iccom_statistics()
+        # @verbose if True, then prints detailed info
+        def iccom_destroy_default_stack(self, verbose=False):
+                if verbose:
+                        self.print_iccom_statistics()
 
-                print("Destroying default test env.")
+                if verbose:
+                        print("Destroying default test env.")
 
                 if not self.skip_iccom_skif_device:
                         iccom_skif.delete_iccom_sockets_device(
@@ -121,14 +124,15 @@ class IccomTestEnv:
                 delete_fd_test_transport_device(
                       self.iccom_transport_dev_name, None)
 
-                print("Default test env destroyed.")
+                if verbose:
+                        print("Default test env destroyed.")
 
         def __enter__(self):
                 self.iccom_create_default_stack()
                 return self
 
         def __exit__(self, exc_type, exc_value, traceback):
-                self.iccom_destroy_default_stack()
+                self.iccom_destroy_default_stack(verbose=(exc_type is not None))
 
         # Checks that the given data (fitting into one package) is received via
         # ICCom.
