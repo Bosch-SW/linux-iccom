@@ -1,4 +1,5 @@
 import sys
+import json
 
 # Parses ICCom package into human readable data.
 # For now just prints it to stdout.
@@ -8,9 +9,11 @@ def iccom_parse(data_package_bytes):
     package_sequence_id = int.from_bytes(data_package_bytes[2:3], 'little')
     ppb = data_package_bytes[3:3 + package_payload_size]
 
-    print("Package:")
-    print("  payload size: %d bytes" % package_payload_size)
-    print("  sequence id: %d" % package_sequence_id)
+    parsing_result = {
+        "package_payload_size": package_payload_size
+        , "package_sequence_id": package_sequence_id
+        , "packets": []
+    }
 
     pkt_off = 0
     while (pkt_off < package_payload_size):
@@ -20,13 +23,19 @@ def iccom_parse(data_package_bytes):
         ch = (hi_ch << 7) | lo_ch
         complete = ((int.from_bytes(ppb[pkt_off + 3 : pkt_off + 4], 'big') & 0x80) == 0x80)
 
-        print("  Pkt:")
-        print("    ch: %d" % ch)
-        print("    complete: %s" % ("true" if complete else "false"))
-        print("    payload size: %d bytes" % p_size)
-        print("    payload: %s" % (ppb[pkt_off + 4: pkt_off + 4 + p_size].hex(),))
+        pkt = {
+            "ch": ch
+            , "complete": complete
+            , "data_size": p_size
+            , "data": ppb[pkt_off + 4: pkt_off + 4 + p_size].hex()
+        }
+        parsing_result["packets"].append(pkt)
 
         pkt_off += 4 + p_size
+
+    print(json.dumps(parsing_result))
+
+    return parsing_result
 
 if (len(sys.argv) < 2):
     print("Hello, I parse ICCom data packages, pls give me a hex string as first arg.\n")
