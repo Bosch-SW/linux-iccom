@@ -323,6 +323,10 @@ Long story short, the current picture is the following:
 
 1. ICCom Socket IF lets the ICCom stack to run.
 
+# How to debug your application communication using ICCom stack?
+
+Please jump to the dedicated [applications debugging tools](./docs/apps_debugging_tools.md) document.
+
 # How to build and run it
 
 This repository is expected to be built as out-of-tree module.
