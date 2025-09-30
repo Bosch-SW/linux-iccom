@@ -42,15 +42,15 @@ like this:
 
 If you somehow got the iccom data package (more on this later)
 and need to check which payloads are contained in the package
-use the `./tools/parser.py` utility (**NOTE: it for now assumes
+use the `./tools/iccom-package-parser.py` utility (**NOTE: it for now assumes
 that the package is correct, so you will not see a full-blown
 parsing covering invalid package datas**):
 
 ```
-$ python3 parser.py 001801000200957473000200827473000200837473000200847473ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfa6d7a7
+$ python3 iccom-package-parser.py 001801000200957473000200827473000200837473000200847473ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbfa6d7a7
 ```
 
-where the first `parser.py` argument is the full data package
+where the first `iccom-package-parser.py` argument is the full data package
 hex representation.
 
 It will output the parse information for the package like following:
