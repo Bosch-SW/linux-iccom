@@ -570,6 +570,118 @@ def iccom_initial_package(params, get_test_info=False):
                 # Check channel data
                 check_ch_data(te.iccom_name(), ch, answer_str, None)
 
+def iccom_big_messages_rcv(params, get_test_info=False):
+
+        if (get_test_info):
+            return { "test_description": ("big messages receive by ICCom driver")
+                     , "test_id": "big_messages_rcv" }
+
+        ch = 101
+
+        with IccomTestEnv() as te:
+
+            create_iccom_sysfs_channel(te.iccom_name(), ch, None)
+            create_transport_device_RW_files(te.test_transport_name(), None)
+
+            rcv = {}
+            def handler(ch, msg):
+                if chan not in rcv:
+                    rcv[chan] = []
+                rcv[chan].append(msg)
+
+            ic = IccomProc()
+            ic.set_ch_handler(ch, handler)
+            to_send_out = None
+
+            for i in range(100):
+
+                # random message of len (i + 1) * 10
+                msg_str = ''.join(random.choices(string.ascii_uppercase +
+                                            string.digits, k=(i + 1)*10))
+                msg = msg_str.encode('utf-8')
+
+                print("wire -> iccom msg: " + str(msg))
+
+                ic.send_msg(channel=ch, msg=msg)
+                to_send_out = ic.get_curr_out()
+
+                frame = 0
+                success = False
+                while (frame < 100):
+                    # actual wire xfer
+                    incoming_data = wire_xfer(te.test_transport_name(), to_send_out, None, None)
+                    to_send_out = ic.process_xfer(incoming_data)
+                    if (not ic.has_data_to_send()):
+                        # Check channel data
+                        check_ch_data(te.iccom_name(), ch, msg_str, None)
+                        success = True
+                        break
+
+                    frame += 1
+                if not success:
+                    raise RuntimeError("The message from wire (%s) was not received"
+                                       " on ICCom side within %d communication frames"
+                                       % (msg_str, frame))
+
+def iccom_big_messages_snd(params, get_test_info=False):
+
+        if (get_test_info):
+            return { "test_description": ("big messages send by ICCom driver")
+                     , "test_id": "big_messages_snd" }
+
+        ch = 1010
+
+        with IccomTestEnv() as te:
+
+            create_iccom_sysfs_channel(te.iccom_name(), ch, None)
+            create_transport_device_RW_files(te.test_transport_name(), None)
+
+            rcv = {}
+            def handler(ch, msg):
+                if ch not in rcv:
+                    rcv[ch] = []
+                rcv[ch].append(msg)
+
+            ic = IccomProc()
+            ic.set_ch_handler(ch, handler)
+            to_send_out = None
+
+            for i in range(100):
+
+                # random message of len (i + 1) * 10
+                msg_str = ''.join(random.choices(string.ascii_uppercase +
+                                            string.digits, k=(i + 1)*10))
+                msg = msg_str.encode('utf-8')
+
+                print("iccom -> wire msg: " + str(msg))
+
+                iccom_sysfs_send(te.iccom_name(), ch, msg_str, None)
+
+                to_send_out = ic.get_curr_out()
+
+                frame = 0
+                success = False
+                while (frame < 100):
+                    # actual wire xfer
+                    incoming_data = wire_xfer(te.test_transport_name(), to_send_out, None, None)
+                    to_send_out = ic.process_xfer(incoming_data)
+                    if ch in rcv:
+                        # Check channel data
+                        if (msg != rcv[ch][0]):
+                            RuntimeError("Received from ICCom msg != expected:\n"
+                                         "         rcv: %s\n"
+                                         "    expected: %s\n"
+                                         % (str(rcv[ch][0]), str(msg)))
+                        success = True
+                        break
+
+                    frame += 1
+                if not success:
+                    raise RuntimeError("The message from ICCom (%s) was not received"
+                                       " on wire within %d communication frames"
+                                       % (msg_str, frame))
+
+
 class IccomTester(GeneralTest):
 
     def __init__(self, skip_list=None, run_list=None):
@@ -607,6 +719,8 @@ class IccomTester(GeneralTest):
         })
 
         self.test(iccom_initial_package, {})
+        self.test(iccom_big_messages_rcv, {})
+        self.test(iccom_big_messages_snd, {})
 
 def run_tests():
      

@@ -38,7 +38,7 @@ class GeneralTest:
                 for (test_id, test_info) in self.tests.items():
                         failed += 1 if test_info["result"] == False else 0
                         skipped += 1 if test_info["result"] is None else 0
-                        not_applicable += 1 if test_info["result"] is "NA" else 0
+                        not_applicable += 1 if test_info["result"] == "NA" else 0
                         print("%s: %s" % (test_id, result_table[test_info["result"]]))
 
                 if failed == 0:
