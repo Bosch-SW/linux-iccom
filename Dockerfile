@@ -103,27 +103,18 @@ RUN mkdir -p ${INITRAMFS_CHROOT_ARM}/modules            \
     && cp ${repo_path}/src/iccom_tty.ko                 \
           ${INITRAMFS_CHROOT_ARM}/modules/
 
-# NOTE: Run the qemu tests with the main
-#       iccom variant
-FROM iccom AS iccom-test
-
-####### TEST BLOCK #######
-#
-# Taking our test module and building it
-#
-
-# x86
-
-COPY test/sysfs.py /builds/python-test/
-COPY test/general_test.py /builds/python-test/
-COPY test/iccom.py /builds/python-test/
-COPY test/iccom_skif.py /builds/python-test/
-COPY test/iccom_testenv.py /builds/python-test/
-COPY test/iccom_test.py /builds/python-test/
-COPY test/iccom_skif_test.py /builds/python-test/
-COPY test/iccom_tty_test.py /builds/python-test/
-COPY test/iccom_main.py /builds/python-test/
-
+# those scripts may be used by dependendant modules, so we keep them
+# in the iccom image (instead of iccom-test)
+COPY test/sysfs.py                  \
+      test/general_test.py          \
+      test/iccom.py                 \
+      test/iccom_skif.py            \
+      test/iccom_testenv.py         \
+      test/iccom_test.py            \
+      test/iccom_skif_test.py       \
+      test/iccom_tty_test.py        \
+      test/iccom_main.py            \
+      /builds/python-test/
 RUN python-to-initramfs-x86 /builds/python-test/sysfs.py \
       && python-to-initramfs-x86 /builds/python-test/general_test.py \
       && python-to-initramfs-x86 /builds/python-test/iccom.py \
@@ -134,6 +125,14 @@ RUN python-to-initramfs-x86 /builds/python-test/sysfs.py \
       && python-to-initramfs-x86 /builds/python-test/iccom_tty_test.py \
       && python-to-initramfs-x86 /builds/python-test/iccom_main.py
 
+# NOTE: Run the qemu tests with the main
+#       iccom variant
+FROM iccom AS iccom-test
+
+####### TEST BLOCK #######
+#
+# Taking our test module and building it
+#
 
 RUN run-qemu-tests-x86
 
@@ -158,10 +157,11 @@ RUN shell-to-initramfs-arm /builds/shell-tests/iccom_main.sh
 
 # Add shell Test
 RUN mkdir -p /builds/shell-tests
-COPY test/iccom_test.sh /builds/shell-tests
-COPY test/iccom_tty_test.sh /builds/shell-tests
-RUN shell-to-initramfs-arm /builds/shell-tests/iccom_test.sh
-RUN shell-to-initramfs-arm /builds/shell-tests/iccom_tty_test.sh
+COPY test/iccom_test.sh \
+            test/iccom_tty_test.sh \
+     /builds/shell-tests
+RUN shell-to-initramfs-arm /builds/shell-tests/iccom_test.sh      \
+      && shell-to-initramfs-arm /builds/shell-tests/iccom_tty_test.sh
 
 RUN run-qemu-tests-arm /builds/linux_arm/device_tree/ast2500.dtb
 
