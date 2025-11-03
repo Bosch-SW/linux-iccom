@@ -110,20 +110,12 @@ COPY test/sysfs.py                  \
       test/iccom.py                 \
       test/iccom_skif.py            \
       test/iccom_testenv.py         \
-      test/iccom_test.py            \
-      test/iccom_skif_test.py       \
-      test/iccom_tty_test.py        \
-      test/iccom_main.py            \
       /builds/python-test/
 RUN python-to-initramfs-x86 /builds/python-test/sysfs.py \
       && python-to-initramfs-x86 /builds/python-test/general_test.py \
       && python-to-initramfs-x86 /builds/python-test/iccom.py \
       && python-to-initramfs-x86 /builds/python-test/iccom_skif.py \
-      && python-to-initramfs-x86 /builds/python-test/iccom_testenv.py \
-      && python-to-initramfs-x86 /builds/python-test/iccom_test.py \
-      && python-to-initramfs-x86 /builds/python-test/iccom_skif_test.py \
-      && python-to-initramfs-x86 /builds/python-test/iccom_tty_test.py \
-      && python-to-initramfs-x86 /builds/python-test/iccom_main.py
+      && python-to-initramfs-x86 /builds/python-test/iccom_testenv.py
 
 # NOTE: Run the qemu tests with the main
 #       iccom variant
@@ -133,6 +125,16 @@ FROM iccom AS iccom-test
 #
 # Taking our test module and building it
 #
+
+COPY test/iccom_test.py             \
+      test/iccom_skif_test.py       \
+      test/iccom_tty_test.py        \
+      test/iccom_main.py            \
+      /builds/python-test/
+RUN python-to-initramfs-x86 /builds/python-test/iccom_test.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom_skif_test.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom_tty_test.py \
+      && python-to-initramfs-x86 /builds/python-test/iccom_main.py
 
 RUN run-qemu-tests-x86
 

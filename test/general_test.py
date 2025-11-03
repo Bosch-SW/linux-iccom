@@ -50,7 +50,7 @@ class GeneralTest:
                                    ("(%sNA %d%s)" % (CYANC, not_applicable, NOC))
                                 ))
                 else:
-                        print("\nOVERAL RESULT: %s%d failed%s of total %d%s\n"
+                        print("\nOVERAL RESULT: %s%d failed%s of total %d%s%s\n"
                               % (REDC, failed, NOC, len(self.tests.keys()) - skipped
                                  , "" if skipped == 0 else
                                    ("(%sskipped %d%s)" % (YELLOYC, skipped, NOC))

@@ -8,17 +8,17 @@ import os
 # @file {string} file to read
 # @err_expectation {number} the errno which is expected
 #                           to be caught. Example: None, errno.EIO, ...
+# @binary if to open file in binary mode
 #
 # Returns:
-# Empty String
-# String with data read
+#       bytearray of file contents
 #
 # Throws an exception if the received error doesn't match expected
-def read_sysfs_file(file, err_expectation):
+def read_sysfs_file(file, err_expectation, binary=False):
 
     try:
-        with open(file, 'r') as file:
-            return str(file.read())
+        with open(file, 'r' + ('b' if binary else '')) as file:
+            return file.read()
     except OSError as e:
         if err_expectation == None:
             raise RuntimeError("Sysfs read file unexpected error \n"
@@ -32,7 +32,7 @@ def read_sysfs_file(file, err_expectation):
                      "    (actual) %s \n"
                      "    (expectation) %s \n"
                      % (file, e.errno, err_expectation))
-    return ""
+    return bytearray()
 
 # Write a sysfs file and handle expectations
 # within the function by raising errors when errors
@@ -42,11 +42,12 @@ def read_sysfs_file(file, err_expectation):
 # @content_to_write {string} content to write
 # @err_expectation {number} the errno which is expected
 #                           to be caught. Example: None, errno.EIO, ...
+# @binary if to write in binary mode
 #
 # Throws an exception if the received error doesn't match expected
-def write_sysfs_file(file, content_to_write, err_expectation):
+def write_sysfs_file(file, content_to_write, err_expectation, binary=False):
     try:
-        with open(file, 'w') as file_obj:
+        with open(file, 'w' + ('b' if binary else '')) as file_obj:
             file_obj.write(content_to_write)
     except OSError as e:
         if err_expectation == None:

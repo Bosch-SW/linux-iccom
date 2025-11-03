@@ -1,7 +1,7 @@
 from crc import Calculator, Crc32
 from time import time
-
 from sysfs import *
+import json
 
 # Create an iccom devices and propagate
 # the error expectations
@@ -129,10 +129,23 @@ def set_iccom_sysfs_channel(iccom_dev, channel, err_expectation):
 # Returns:
 # Empty String
 # String with data read
-def iccom_version(err_expectation):
+def iccom_version(err_expectation=None):
     file = "/sys/class/iccom/version"
-    output = read_sysfs_file(file, err_expectation)
-    return output
+    return read_sysfs_file(file, err_expectation)
+
+# @iccom_dev name of the iccom device, like "iccom.0"
+# Returns: ICCom per-channel statistics data.
+def iccom_channels_statistics(iccom_dev, err_expectation=None):
+    return read_sysfs_file("/sys/devices/platform/%s/channels"
+                                   % (iccom_dev,)
+                           , err_expectation)
+
+# @iccom_dev name of the iccom device, like "iccom.0"
+# Returns: ICCom global statistics data.
+def iccom_statistics(iccom_dev, err_expectation=None):
+    return read_sysfs_file("/sys/devices/platform/%s/statistics"
+                                   % (iccom_dev,)
+                           , err_expectation)
 
 # Writes message to the given iccom sysfs channel
 #
@@ -141,13 +154,14 @@ def iccom_version(err_expectation):
 # @message {string} message to send
 # @err_expectation {number} the errno which is expected
 #                           to be caught. Example: None, errno.EIO, ...
-def iccom_sysfs_send(iccom_dev, channel, message, err_expectation):
+# @binary set to True to write binary stream
+def iccom_sysfs_send(iccom_dev, channel, message, err_expectation, binary=False):
     # Set sysfs channel to work with
     set_iccom_sysfs_channel(iccom_dev, channel, None)
     # Write to the working sysfs channel
     file = "/sys/devices/platform/%s/channels_io" % (iccom_dev)
     command = message
-    write_sysfs_file(file, command, err_expectation)
+    write_sysfs_file(file, command, err_expectation, binary)
 
 # Reads message from the given iccom sysfs channel and propagate
 # the error expectations
@@ -157,11 +171,12 @@ def iccom_sysfs_send(iccom_dev, channel, message, err_expectation):
 # @err_expectation {number} the errno which is expected
 #                           to be caught. Example: None, errno.EIO, ...
 # @timeout_ms {>=0} the timeout to wait for the data to come in ms.
+# @binary if to open the file in binary mode
 #
 # Returns:
 # Empty String
 # String with data read
-def iccom_sysfs_read(iccom_dev, channel, err_expectation, timeout_ms=1000):
+def iccom_sysfs_read(iccom_dev, channel, err_expectation, timeout_ms=1000, binary=False):
     # Set sysfs channel to work with
     set_iccom_sysfs_channel(iccom_dev, channel, None)
     # Read from the working sysfs channel
@@ -169,7 +184,7 @@ def iccom_sysfs_read(iccom_dev, channel, err_expectation, timeout_ms=1000):
 
     start = time()
     while True:
-        output = read_sysfs_file(file, err_expectation)
+        output = read_sysfs_file(file, err_expectation, binary)
         if len(output) > 0:
             break
         if ((time() - start) * 1000 > timeout_ms):
@@ -376,7 +391,7 @@ def delete_transport_device_RW_files(transport_dev, err_expectation):
 # RETURNS: the new bytearray - a complete package ready to sent
 def iccom_package(package_sequential_number, package_payload
                   , package_size_bytes = 64):
-    CRC32_SIZE_BYTES = 4
+    CRC32_SIZE_BYTES = iccom_package_crc_size()
 
     if (package_sequential_number > 0xff) or (package_sequential_number < 0):
         raise ValueError("The package_sequential_number must fit the unsigned"
@@ -462,8 +477,9 @@ def iccom_package_parse(data_pkg_bytes, pedantic=False):
     if (data_pkg_bytes == iccom_nack_package()):
         return {"type": "nack"}
 
-    PKG_HEADER_SIZE = 3
-    PKG_CRC_SIZE = 4
+    PKG_HEADER_SIZE = iccom_package_header_size()
+    PKG_CRC_SIZE = iccom_package_crc_size()
+
     if (len(data_pkg_bytes) <= PKG_HEADER_SIZE):
         return {"type": "broken", "error-info": "too small to be data package"}
 
@@ -548,6 +564,15 @@ def iccom_package_parse(data_pkg_bytes, pedantic=False):
 
     return res 
 
+def iccom_package_header_size():
+    return 3
+
+def iccom_package_crc_size():
+    return 4
+
+def iccom_package_payload_size(pkg_total_size):
+    return pkg_total_size - iccom_package_header_size() - iccom_package_crc_size()
+
 def iccom_package_get_data_size(data_pkg_bytes):
     return int.from_bytes(data_pkg_bytes[0:2], 'big', signed=False)
 
@@ -578,7 +603,7 @@ def iccom_package_inc_data_size(data_pkg_bytes, increment):
 #
 # RETURNS: how many msg bytes were appended to the package data
 def package_append_msg(package_data, channel, msg, force_max=True):
-    CRC_SIZE = 4
+    CRC_SIZE = iccom_package_crc_size()
 
     p_pr = iccom_package_parse(package_data, pedantic=True)
 
@@ -658,7 +683,19 @@ class IccomProc:
     #   to handle the incoming messages, the handler will be called every time
     #   when a message on the given channel is completed.
     def set_ch_handler(self, channel, handler):
+        if handler is None:
+            del(self.handlers[channel])
+            return
         self.handlers[channel] = handler
+
+    # removes the handler for the channel
+    # @channel the channel to remove the handler from
+    def rm_ch_handler(self, channel):
+        del(self.handlers[channel])
+
+    # Returns handler for the channel or None
+    def ch_handler(self, channel):
+        return self.handlers[channel] if channel in self.handlers else None
 
     # Sets the default handler for all messages.
     # @handler the method with (int channel, bytearray msg) arguments
@@ -723,6 +760,7 @@ class IccomProc:
         if pr["type"] == "broken":
             self.frame = self.FRAME_ACK
             self.ack_pkg = iccom_nack_package()
+            print("IccomProc: got broken package: %s" % (data_package_bytes.hex()))
             return self.ack_pkg
 
         if self.frame == self.FRAME_DATA:
@@ -730,6 +768,8 @@ class IccomProc:
             if (pr["type"] == "ack" or pr["type"] == "nack"):
                 self.frame = self.FRAME_ACK
                 self.ack_pkg = iccom_nack_package()
+                print("IccomProc: got ack/nack frame (%s) while expecting data package"
+                        % (data_package_bytes.hex()))
                 return self.ack_pkg
             
             # already processed
@@ -752,7 +792,7 @@ class IccomProc:
                     elif self.def_handler is not None:
                         self.def_handler(ch, self.msgs[ch])
                     else:
-                        print("dropping msg to ch %d, no one listens\n" % (ch,))
+                        print("IccomProc: dropping msg to ch %d, no one listens\n" % (ch,))
 
                     del(self.msgs[ch])
 
@@ -766,6 +806,8 @@ class IccomProc:
         if pr["type"] == "data":
             self.frame = self.FRAME_ACK
             self.ack_pkg = iccom_nack_package()
+            print("IccomProc: while expecting ack/nack package, got data: %s"
+                        % (data_package_bytes.hex()))
             return self.ack_pkg
 
         if pr["type"] == "nack":
@@ -780,3 +822,99 @@ class IccomProc:
         del(self.outgoing_pkgs[0])
 
         return self.get_curr_out()
+
+    # Does the exchange of the data between the IccomProc (wire) and the
+    # other side ICCom instance (iccom).
+    # NOTE: it supports the multi-package sized messages out of the box.
+    #
+    # NOTE: the messages should have been sent from client layers by caller.
+    #       like: iccom_sysfs_send(iccom_dev, ch, i2w_msg_bytes, None, binary=True)
+    #
+    # @ch ICCom communication channel to use (for both directions)
+    # @i2w_msg_bytes {bytearray or None}, expected iccom -> wire data
+    # @w2i_msg_bytes {bytearray or None}, expected wire -> iccom data
+    # @do_wire_xfer callable which gets the data to be sent via wire and
+    #           returns the data received from the wire. This exact implementation
+    #           depends on actual transport driver.
+    # @package_size_bytes the data package size in bytes
+    # @max_frames set apriori max frames to use - needed for the test cases with
+    #   noisy channel conditions, when it is hard to provide the fits-all algorithm
+    #   to compute the proper threshold.
+    #   None: ignored,
+    #   Int:  the max frames to run before exiting.
+    def data_exchange_sequence(self, iccom_dev, ch
+                               , i2w_msg_bytes, w2i_msg_bytes, do_wire_xfer
+                               , package_size_bytes = 64
+                               , max_frames=None):
+
+        # receiver for messages from ICCom
+        rcv = {}
+        def handler(ch, msg):
+            if ch not in rcv:
+                rcv[ch] = []
+            rcv[ch].append(msg)
+
+        old_handler = self.ch_handler(ch)
+        self.set_ch_handler(ch, handler)
+        to_send_out = None
+
+        # DATA EXCHANGE CYCLE
+
+        # how many frames we need at worst
+        max_bytes_per_pkg = iccom_package_payload_size(package_size_bytes) - iccom_packet_header_size()
+        max_data_size = max(len(i2w_msg_bytes), len(w2i_msg_bytes))
+        data_frames = (max_data_size  + (max_bytes_per_pkg - 1)) / max_bytes_per_pkg + 1
+        max_frames_run = 2 * data_frames + 2
+        if max_frames is not None:
+            max_frames_run = max_frames
+
+        try:
+            to_send_out = self.get_curr_out()
+
+            frame = 0
+            while (frame < max_frames_run):
+                # actual wire xfer
+                incoming_data = do_wire_xfer(to_send_out)
+
+                good = (to_send_out == iccom_ack_package()
+                        and incoming_data == iccom_ack_package())
+
+                # protocol processing
+                to_send_out = self.process_xfer(incoming_data)
+
+                # NOTE: IMPORTANT: in general we need to stop under following condition:
+                #       neither of two sides wants to send anything.
+                #       * our tx queue has only one pkg and it is empty
+                #       * no data from the other side
+                if ((ch in rcv) and not self.has_data_to_send() and self.frame == self.FRAME_DATA
+                        and good):
+                    break
+
+                frame += 1
+        except Exception as e:
+            raise
+        finally:
+            self.set_ch_handler(ch, old_handler)
+
+        if not ch in rcv:
+            raise RuntimeError("ICCom -> wire msg (%s) was not received"
+                                " on wire within %d frames. Rcv: %s"
+                                % (i2w_msg_bytes.hex(), max_frames_run
+                                    , json.dumps(rcv)))
+        if self.has_data_to_send():
+            raise RuntimeError("Wire -> ICCom msg (%s) was not confirmed"
+                                " to be received by ICCom within %d frames"
+                                % (w2i_msg_bytes.hex(), max_frames_run))
+        if (i2w_msg_bytes != rcv[ch][0]):
+            RuntimeError("ICCom -> wire msg != expected:\n"
+                            "         rcv: %s\n"
+                            "    expected: %s\n"
+                            % (str(rcv[ch][0].hex()), str(i2w_msg_bytes.hex())))
+
+        w2i_msg_on_iccom_side = iccom_sysfs_read(iccom_dev, ch, None, binary=True)
+        if (w2i_msg_bytes != w2i_msg_on_iccom_side):
+            RuntimeError("wire -> ICCom msg != expected:\n"
+                            "         rcv: %s\n"
+                            "    expected: %s\n"
+                            % (w2i_msg_on_iccom_side.hex()
+                                , w2i_msg_bytes.hex()))
